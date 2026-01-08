@@ -2,9 +2,15 @@ module github.com/MoonshotAI/kimi-agent-sdk/go
 
 go 1.25
 
-tool github.com/x5iu/defc
+tool (
+	github.com/x5iu/defc
+	go.uber.org/mock/mockgen
+)
 
-require golang.org/x/text v0.32.0
+require (
+	go.uber.org/mock v0.6.0
+	golang.org/x/text v0.32.0
+)
 
 require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
