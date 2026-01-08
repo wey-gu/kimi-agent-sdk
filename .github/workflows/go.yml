@@ -47,4 +47,7 @@ jobs:
 
       - name: Run tests
         working-directory: go
+        env:
+          KIMI_BASE_URL: ${{ secrets.KIMI_BASE_URL }}
+          KIMI_API_KEY: ${{ secrets.KIMI_API_KEY }}
         run: go test -v ./...
