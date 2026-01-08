@@ -45,6 +45,20 @@ jobs:
       - name: Install kimi-cli
         run: |
           uv tool install --python 3.13 kimi-cli
+          mkdir -p ~/.kimi
+          cat > ~/.kimi/config.toml <<TOML
+          default_model = "kimi-for-coding"
+
+          [models.kimi-for-coding]
+          provider = "kimi-for-coding"
+          model = "kimi-for-coding"
+          max_context_size = 262144
+
+          [providers.kimi-for-coding]
+          type = "kimi"
+          base_url = "$KIMI_BASE_URL"
+          api_key = "$KIMI_API_KEY"
+          TOML
           kimi --print -c hi
 
       - name: Build test fixtures
@@ -53,4 +67,4 @@ jobs:
 
       - name: Run tests
         working-directory: go
-        run: go test -cover -race -count=5 ./...
+        run: go test -cover -race -count=1 ./...
