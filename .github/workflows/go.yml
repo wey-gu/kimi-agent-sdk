@@ -35,6 +35,16 @@ jobs:
         with:
           go-version: '1.25'
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install kimi-cli
+        run: uv tool install --python 3.13 kimi-cli
+
+      - name: Build test fixtures
+        working-directory: go
+        run: go build -o test/integration/testdata/mock_kimi test/integration/testdata/mock_kimi.go
+
       - name: Run tests
         working-directory: go
         run: go test -v ./...
