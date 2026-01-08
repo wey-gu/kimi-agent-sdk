@@ -2,7 +2,7 @@ package kimi
 
 import (
 	"io"
-	"sync/atomic"
+	"sync"
 	"testing"
 
 	"github.com/MoonshotAI/kimi-agent-sdk/go/wire"
@@ -12,12 +12,8 @@ func TestResponder_Event(t *testing.T) {
 	msgs := make(chan wire.Message, 1)
 	usrc := make(chan wire.RequestResponse, 1)
 
-	msgsPtr := new(atomic.Pointer[chan wire.Message])
-	usrcPtr := new(atomic.Pointer[chan wire.RequestResponse])
-	msgsPtr.Store(&msgs)
-	usrcPtr.Store(&usrc)
-
-	responder := &Responder{msgs: msgsPtr, usrc: usrcPtr}
+	var rwlock sync.RWMutex
+	responder := &Responder{rwlock: &rwlock, msgs: &msgs, usrc: &usrc}
 
 	event := &wire.EventParams{
 		Type: wire.EventTypeContentPart,
@@ -50,14 +46,10 @@ func TestResponder_Event(t *testing.T) {
 }
 
 func TestResponder_Event_NilMsgs(t *testing.T) {
+	var msgs chan wire.Message
 	usrc := make(chan wire.RequestResponse, 1)
-
-	msgsPtr := new(atomic.Pointer[chan wire.Message])
-	usrcPtr := new(atomic.Pointer[chan wire.RequestResponse])
-	// msgsPtr is nil (not stored)
-	usrcPtr.Store(&usrc)
-
-	responder := &Responder{msgs: msgsPtr, usrc: usrcPtr}
+	var rwlock sync.RWMutex
+	responder := &Responder{rwlock: &rwlock, msgs: &msgs, usrc: &usrc}
 
 	event := &wire.EventParams{
 		Type: wire.EventTypeContentPart,
@@ -81,12 +73,8 @@ func TestResponder_Request_ApprovalRequest(t *testing.T) {
 	msgs := make(chan wire.Message, 1)
 	usrc := make(chan wire.RequestResponse, 1)
 
-	msgsPtr := new(atomic.Pointer[chan wire.Message])
-	usrcPtr := new(atomic.Pointer[chan wire.RequestResponse])
-	msgsPtr.Store(&msgs)
-	usrcPtr.Store(&usrc)
-
-	responder := &Responder{msgs: msgsPtr, usrc: usrcPtr}
+	var rwlock sync.RWMutex
+	responder := &Responder{rwlock: &rwlock, msgs: &msgs, usrc: &usrc}
 
 	approvalRequest := wire.ApprovalRequest{
 		ID:          "req-123",
@@ -141,14 +129,10 @@ func TestResponder_Request_ApprovalRequest(t *testing.T) {
 }
 
 func TestResponder_Request_NilMsgs(t *testing.T) {
+	var msgs chan wire.Message
 	usrc := make(chan wire.RequestResponse, 1)
-
-	msgsPtr := new(atomic.Pointer[chan wire.Message])
-	usrcPtr := new(atomic.Pointer[chan wire.RequestResponse])
-	// msgsPtr is nil (not stored)
-	usrcPtr.Store(&usrc)
-
-	responder := &Responder{msgs: msgsPtr, usrc: usrcPtr}
+	var rwlock sync.RWMutex
+	responder := &Responder{rwlock: &rwlock, msgs: &msgs, usrc: &usrc}
 
 	approvalRequest := wire.ApprovalRequest{
 		ID:          "req-123",

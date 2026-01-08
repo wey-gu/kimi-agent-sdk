@@ -34,13 +34,16 @@ func NewSession(options ...Option) (*Session, error) {
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return nil, err
 	}
 	codec := jsonrpc2.NewCodec(&stdio{stdin, stdout},
