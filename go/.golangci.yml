@@ -1,0 +1,18 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        - "(io.Closer).Close"
+        - "(io.ReadCloser).Close"
+        - "(io.WriteCloser).Close"
+        - "(*os/exec.Cmd).Wait"
+        - "(*net/rpc.Server).RegisterName"
+        - "(github.com/MoonshotAI/kimi-agent-sdk/go/wire/transport.Transport).Cancel"
+  exclusions:
+    paths:
+      - ".*_test\\.go$"
