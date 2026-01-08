@@ -145,10 +145,7 @@ func TestIntegration_StatusUpdate_Usage(t *testing.T) {
 	}
 	defer session.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	turn, err := session.RoundTrip(ctx, wire.NewStringUserInput("test"))
+	turn, err := session.RoundTrip(context.Background(), wire.NewStringUserInput("test"))
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}

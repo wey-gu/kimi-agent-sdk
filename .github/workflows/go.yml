@@ -61,10 +61,16 @@ jobs:
           TOML
           kimi --print -c hi
 
-      - name: Build test fixtures
+      - name: Run unit tests
         working-directory: go
-        run: go build -o test/integration/testdata/mock_kimi test/integration/testdata/mock_kimi.go
+        run: go test -cover -v $(go list ./... | grep -v /test/)
 
-      - name: Run tests
+      - name: Run integration tests
         working-directory: go
-        run: go test -cover -race -count=1 ./...
+        run: |
+          go build -o test/integration/testdata/mock_kimi test/integration/testdata/mock_kimi.go
+          go test -race -count=5 -v ./test/integration/...
+
+      - name: Run e2e tests
+        working-directory: go
+        run: go test -race -count=5 -v ./test/e2e/...

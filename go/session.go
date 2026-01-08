@@ -114,9 +114,9 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 		id     = atomic.AddUint64(&s.seq, 1)
 		msgs   = make(chan wire.Message)
 		usrc   = make(chan wire.RequestResponse, 1)
-		errc1  = make(chan error, 1)
-		errc2  = make(chan error, 1)
-		resc   = make(chan struct{}, 1)
+		errc1  = make(chan error)
+		errc2  = make(chan error)
+		resc   = make(chan struct{})
 		result = new(atomic.Pointer[wire.PromptResult])
 	)
 	s.rwlock.Lock()
@@ -128,10 +128,16 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 		defer close(errc1)
 		msg0 := <-msgs
 		if _, ok := msg0.(wire.TurnBegin); !ok {
-			errc1 <- ErrTurnNotFound
+			select {
+			case errc1 <- ErrTurnNotFound:
+			case <-ctx.Done():
+			}
 			return
 		}
-		resc <- struct{}{}
+		select {
+		case resc <- struct{}{}:
+		case <-ctx.Done():
+		}
 	})
 	var (
 		ok = make(chan struct{})
@@ -158,6 +164,7 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 				close(ok)
 			case <-ok:
 				ep.Store(&err)
+			case <-ctx.Done():
 			}
 			return
 		}
@@ -257,10 +264,9 @@ func (s *Session) Close() error {
 	for _, cancel := range cancels {
 		cancel() //nolint:errcheck
 	}
-	return errors.Join(
-		s.codec.Close(),
-		s.cmd.Cancel(),
-	)
+	err1 := s.cmd.Cancel()
+	err2 := s.codec.Close()
+	return errors.Join(err1, err2)
 }
 
 type stdio struct {
