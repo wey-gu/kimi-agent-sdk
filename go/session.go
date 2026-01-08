@@ -119,14 +119,13 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 		resc   = make(chan struct{}, 1)
 		result = new(atomic.Pointer[wire.PromptResult])
 	)
-	defer close(errc1)
-	defer close(errc2)
-	defer close(resc)
 	s.rwlock.Lock()
 	s.msgs = msgs
 	s.usrc = usrc
 	s.rwlock.Unlock()
 	bg.Go(func() {
+		defer close(resc)
+		defer close(errc1)
 		msg0 := <-msgs
 		if _, ok := msg0.(wire.TurnBegin); !ok {
 			errc1 <- ErrTurnNotFound
@@ -142,6 +141,7 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 			s.usrc = nil
 			s.rwlock.Unlock()
 			close(msgs)
+			close(errc2)
 		}
 		defer cleanup()
 		result.Store(&wire.PromptResult{Status: wire.PromptResultStatusPending})
@@ -245,7 +245,7 @@ func (s *Session) Close() error {
 	s.turns = nil
 	s.rwlock.Unlock()
 	for _, cancel := range cancels {
-		cancel()
+		cancel() //nolint:errcheck
 	}
 	return errors.Join(
 		s.codec.Close(),
