@@ -146,6 +146,7 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 		}
 		select {
 		case resc <- struct{}{}:
+		case <-errc2:
 		case <-ctx.Done():
 		}
 	})
