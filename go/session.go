@@ -105,9 +105,9 @@ func (s *Session) serve(responder *transport.TransportServer) {
 	}
 }
 
-func wait(codec *jsonrpc2.Codec) {
+func (s *Session) waitForDataExchange() {
 	for {
-		pending := codec.PendingRequests()
+		pending := s.codec.PendingRequests()
 		if pending == 0 {
 			return
 		}
@@ -156,7 +156,7 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 	)
 	bg.Go(func() {
 		cleanup := func() {
-			wait(s.codec)
+			s.waitForDataExchange()
 			s.rwlock.Lock()
 			s.msgs = nil
 			s.usrc = nil
