@@ -126,8 +126,11 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 	bg.Go(func() {
 		defer close(resc)
 		defer close(errc1)
-		msg0 := <-msgs
-		if _, ok := msg0.(wire.TurnBegin); !ok {
+		msg0, ok := <-msgs
+		if !ok {
+			return
+		}
+		if _, ok = msg0.(wire.TurnBegin); !ok {
 			select {
 			case errc1 <- ErrTurnNotFound:
 			case <-ctx.Done():
@@ -166,6 +169,11 @@ func (s *Session) RoundTrip(ctx context.Context, content wire.Content) (*Turn, e
 				ep.Store(&err)
 			case <-ctx.Done():
 			}
+			return
+		}
+		select {
+		case <-ok:
+		case <-ctx.Done():
 			return
 		}
 		result.Store(rpcresult)

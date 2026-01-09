@@ -13,6 +13,7 @@ linters:
         - "(*os/exec.Cmd).Wait"
         - "(*net/rpc.Server).RegisterName"
         - "(github.com/MoonshotAI/kimi-agent-sdk/go/wire/transport.Transport).Cancel"
+        - "(*github.com/MoonshotAI/kimi-agent-sdk/go/wire/jsonrpc2.Codec).Close"
         - "(*github.com/MoonshotAI/kimi-agent-sdk/go.Turn).Cancel"
   exclusions:
     paths:
