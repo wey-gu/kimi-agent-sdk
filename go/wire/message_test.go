@@ -272,14 +272,12 @@ func TestEventParams_UnmarshalJSON_AllEventTypes(t *testing.T) {
 	}
 }
 
-func TestEventParams_UnmarshalJSON_UnknownTypePanics(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
+func TestEventParams_UnmarshalJSON_UnknownTypeReturnsError(t *testing.T) {
 	var p EventParams
-	_ = json.Unmarshal([]byte(`{"type":"DoesNotExist","payload":{}}`), &p)
+	err := json.Unmarshal([]byte(`{"type":"DoesNotExist","payload":{}}`), &p)
+	if err == nil {
+		t.Fatalf("expected error for unknown event type")
+	}
 }
 
 func TestRequestParams_UnmarshalJSON_ApprovalRequest(t *testing.T) {
@@ -320,12 +318,10 @@ func TestRequestParams_UnmarshalJSON_ApprovalRequest(t *testing.T) {
 	}
 }
 
-func TestRequestParams_UnmarshalJSON_UnknownTypePanics(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
+func TestRequestParams_UnmarshalJSON_UnknownTypeReturnsError(t *testing.T) {
 	var p RequestParams
-	_ = json.Unmarshal([]byte(`{"type":"DoesNotExist","payload":{}}`), &p)
+	err := json.Unmarshal([]byte(`{"type":"DoesNotExist","payload":{}}`), &p)
+	if err == nil {
+		t.Fatalf("expected error for unknown request type")
+	}
 }

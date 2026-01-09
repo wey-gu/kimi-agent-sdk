@@ -115,7 +115,11 @@ func (params *EventParams) UnmarshalJSON(data []byte) (err error) {
 	if err := json.Unmarshal(data, &discriminator); err != nil {
 		return err
 	}
-	if params.Payload, err = eventUnmarshaler[discriminator.Type](discriminator.Payload); err != nil {
+	unmarshaler, ok := eventUnmarshaler[discriminator.Type]
+	if !ok {
+		return fmt.Errorf("unknown event type: %q", discriminator.Type)
+	}
+	if params.Payload, err = unmarshaler(discriminator.Payload); err != nil {
 		return err
 	}
 	params.Type = discriminator.Type
@@ -162,7 +166,11 @@ func (params *RequestParams) UnmarshalJSON(data []byte) (err error) {
 	if err := json.Unmarshal(data, &discriminator); err != nil {
 		return err
 	}
-	if params.Payload, err = requestUnmarshaler[discriminator.Type](discriminator.Payload); err != nil {
+	unmarshaler, ok := requestUnmarshaler[discriminator.Type]
+	if !ok {
+		return fmt.Errorf("unknown request type: %q", discriminator.Type)
+	}
+	if params.Payload, err = unmarshaler(discriminator.Payload); err != nil {
 		return err
 	}
 	params.Type = discriminator.Type
