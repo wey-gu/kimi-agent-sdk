@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,56 @@ func TestIntegration_EventBlocking(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("BLOCKING DETECTED: test timed out, Event method may be blocking while holding lock")
 	}
+}
+
+// TestIntegration_Turn_Err_PromptError tests that turn.Err() correctly captures
+// a JSONRPC error returned after TurnBegin.
+//
+// Scenario:
+// 1. mock_kimi sends TurnBegin event (turn starts successfully)
+// 2. mock_kimi returns a JSONRPC error for the prompt request
+// 3. turn.Err() should contain the error
+func TestIntegration_Turn_Err_PromptError(t *testing.T) {
+	mockPath := getMockKimiPath(t)
+
+	session, err := kimi.NewSession(
+		kimi.WithExecutable(mockPath),
+		withMode("prompt_error"),
+	)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// RoundTrip should return a turn (since TurnBegin is sent before the error)
+	turn, err := session.RoundTrip(ctx, wire.NewStringUserInput("test"))
+	if err != nil {
+		t.Fatalf("RoundTrip: expected turn to be returned, got error: %v", err)
+	}
+
+	// Consume all steps to allow the turn to complete
+	for step := range turn.Steps {
+		for range step.Messages {
+		}
+	}
+
+	turn.Cancel()
+
+	// Check that turn.Err() contains the JSONRPC error
+	turnErr := turn.Err()
+	if turnErr == nil {
+		t.Fatal("expected turn.Err() to return an error, got nil")
+	}
+
+	// Verify the error message contains expected content
+	if !strings.Contains(turnErr.Error(), "simulated prompt error") {
+		t.Errorf("expected error to contain 'simulated prompt error', got: %v", turnErr)
+	}
+
+	t.Logf("turn.Err() correctly captured the error: %v", turnErr)
 }
 
 // TestIntegration_ConcurrentRoundTrips tests multiple concurrent RoundTrip calls

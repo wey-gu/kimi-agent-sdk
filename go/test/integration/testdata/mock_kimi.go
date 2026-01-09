@@ -9,6 +9,7 @@
 //   normal (default) - standard behavior
 //   deadlock - sends ApprovalRequest then immediately completes prompt
 //   flood - sends many events rapidly
+//   prompt_error - sends TurnBegin then returns a JSONRPC error
 
 package main
 
@@ -72,6 +73,8 @@ func main() {
 				handlePromptDeadlock(encoder, req.ID)
 			case "flood":
 				handlePromptFlood(encoder, req.ID)
+			case "prompt_error":
+				handlePromptError(encoder, req.ID)
 			default:
 				handlePrompt(encoder, req.ID)
 			}
@@ -212,6 +215,27 @@ func handlePromptFlood(encoder *json.Encoder, reqID string) {
 		Version: "2.0",
 		ID:      reqID,
 		Result:  json.RawMessage(`{"status":"finished","steps":1}`),
+	})
+}
+
+// handlePromptError sends TurnBegin then returns a JSONRPC error.
+// This tests whether turn.Err() correctly captures the error after TurnBegin.
+func handlePromptError(encoder *json.Encoder, reqID string) {
+	// Send TurnBegin event first
+	sendEvent(encoder, "TurnBegin", map[string]any{
+		"user_input": "test",
+	})
+
+	// Send StepBegin event so the turn can process messages
+	sendEvent(encoder, "StepBegin", map[string]any{
+		"n": 1,
+	})
+
+	// Return a JSONRPC error response
+	encoder.Encode(Payload{
+		Version: "2.0",
+		ID:      reqID,
+		Error:   json.RawMessage(`{"code":-32000,"message":"simulated prompt error"}`),
 	})
 }
 

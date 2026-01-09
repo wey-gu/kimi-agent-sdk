@@ -254,6 +254,7 @@ func (r *Responder) Request(request *wire.RequestParams) (*wire.RequestResult, e
 }
 
 func (s *Session) Close() error {
+	defer s.codec.Close()
 	s.rwlock.Lock()
 	cancels := make([]func() error, len(s.turns))
 	for i, turn := range s.turns {
@@ -264,9 +265,7 @@ func (s *Session) Close() error {
 	for _, cancel := range cancels {
 		cancel() //nolint:errcheck
 	}
-	err1 := s.cmd.Cancel()
-	err2 := s.codec.Close()
-	return errors.Join(err1, err2)
+	return s.cmd.Cancel()
 }
 
 type stdio struct {
