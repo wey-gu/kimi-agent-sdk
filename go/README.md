@@ -37,7 +37,7 @@ func main() {
     }
     defer session.Close()
 
-    turn, err := session.RoundTrip(context.Background(), wire.NewStringUserInput("Hello!"))
+    turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("Hello!"))
     if err != nil {
         panic(err)
     }
@@ -83,10 +83,10 @@ for step := range turn.Steps {
 
 ## Important Notes
 
-1. **Sequential RoundTrips**: Call `RoundTrip` sequentially. Wait for the previous turn to complete before starting a new one.
+1. **Sequential Prompts**: Call `Prompt` sequentially. Wait for the previous turn to complete before starting a new one.
 
 2. **Resource Cleanup**: Always use `defer session.Close()` to ensure proper cleanup.
 
-3. **Consume All Messages**: You must consume all messages from `step.Messages` and all steps from `turn.Steps` before starting a new RoundTrip.
+3. **Consume All Messages**: You must consume all messages from `step.Messages` and all steps from `turn.Steps` before starting a new Prompt.
 
 4. **Cancellation**: You can cancel a turn either by canceling the context or by calling `turn.Cancel()` explicitly.
