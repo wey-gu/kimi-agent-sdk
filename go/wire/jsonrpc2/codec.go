@@ -83,13 +83,14 @@ type Codec struct {
 	srvreqids map[uint64]string
 	thisreq   Request
 
-	clilock   sync.Mutex
-	clireqids map[string]uint64
-	reqmeth   map[string]string
-	thisres   Response
+	clilock     sync.Mutex
+	clireqids   map[string]uint64
+	reqmeth     map[string]string
+	thisres     Response
+	rxcloseonce sync.Once
 
-	outpls    chan *Payload
-	closeonce sync.Once
+	outpls      chan *Payload
+	txcloseonce sync.Once
 
 	inreqs chan Request
 	inress chan Response
@@ -121,9 +122,10 @@ func (c *Codec) send() {
 }
 
 func (c *Codec) recv() {
-	defer func() { _ = recover() }()
-	defer close(c.inreqs)
-	defer close(c.inress)
+	defer c.txcloseonce.Do(func() {
+		close(c.inreqs)
+		close(c.inress)
+	})
 	for {
 		var payload Payload
 		if err := c.dec.Decode(&payload); err != nil {
@@ -329,9 +331,10 @@ gracefulshutdown:
 			time.Sleep(time.Duration(pending) * time.Second)
 		}
 	}
-	c.closeonce.Do(func() {
+	c.rxcloseonce.Do(func() {
 		close(c.outpls)
-		defer func() { _ = recover() }()
+	})
+	c.txcloseonce.Do(func() {
 		close(c.inreqs)
 		close(c.inress)
 	})
