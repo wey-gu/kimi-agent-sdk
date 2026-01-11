@@ -162,7 +162,6 @@ func roundtrip[T any, R any, I interface {
 			select {
 			case wireMessageChan <- msg:
 			case <-ctx.Done():
-				return
 			}
 		}
 	})
