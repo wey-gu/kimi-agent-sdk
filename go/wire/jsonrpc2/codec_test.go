@@ -30,17 +30,18 @@ func testServerRenamer(method string) string {
 	return testServiceName + "." + cases.Title(language.English).String(method)
 }
 
-func newTestCodec(rwc io.ReadWriteCloser) *Codec {
+func newTestCodec(rwc io.ReadWriteCloser, options ...CodecOption) *Codec {
 	seq := atomic.Uint64{}
-	return NewCodec(
-		rwc,
+	opts := []CodecOption{
 		ClientMethodRenamer(RenamerFunc(testClientRenamer)),
 		ServerMethodRenamer(RenamerFunc(testServerRenamer)),
 		JSONIDGenerator(GeneratorFunc[string](func() string {
 			return strconv.FormatUint(seq.Add(1), 10)
 		})),
-		ShutdownTimeout(200*time.Millisecond),
-	)
+		ShutdownTimeout(200 * time.Millisecond),
+	}
+	opts = append(opts, options...)
+	return NewCodec(rwc, opts...)
 }
 
 type TestArgs struct {
@@ -641,7 +642,7 @@ func TestCodec_StreamSender_WriteRequest_SendsOpenAndCloseFrames(t *testing.T) {
 	if req.ID != "1" {
 		t.Fatalf("unexpected request id: %q", req.ID)
 	}
-	if req.Stream != StreamDisable {
+	if req.Stream != StreamOpen {
 		t.Fatalf("unexpected request stream: %d", req.Stream)
 	}
 	if got, want := string(req.Params), "{}"; got != want {
@@ -653,8 +654,8 @@ func TestCodec_StreamSender_WriteRequest_SendsOpenAndCloseFrames(t *testing.T) {
 	if err := dec.Decode(&p1); err != nil {
 		t.Fatalf("Decode stream open 1: %v", err)
 	}
-	if p1.ID != "1" || p1.Stream != StreamOpen {
-		t.Fatalf("unexpected stream open 1: %+v", p1)
+	if p1.ID != "1" || p1.Stream != StreamSync {
+		t.Fatalf("unexpected stream sync 1: %+v", p1)
 	}
 	if got, want := string(p1.Data), `"one"`; got != want {
 		t.Fatalf("unexpected stream data 1: got %q want %q", got, want)
@@ -665,8 +666,8 @@ func TestCodec_StreamSender_WriteRequest_SendsOpenAndCloseFrames(t *testing.T) {
 	if err := dec.Decode(&p2); err != nil {
 		t.Fatalf("Decode stream open 2: %v", err)
 	}
-	if p2.ID != "1" || p2.Stream != StreamOpen {
-		t.Fatalf("unexpected stream open 2: %+v", p2)
+	if p2.ID != "1" || p2.Stream != StreamSync {
+		t.Fatalf("unexpected stream sync 2: %+v", p2)
 	}
 	if got, want := string(p2.Data), `"two"`; got != want {
 		t.Fatalf("unexpected stream data 2: got %q want %q", got, want)
@@ -715,7 +716,7 @@ func TestCodec_StreamSender_WriteResponse_SendsOpenAndCloseFrames(t *testing.T) 
 	if err := dec.Decode(&resp); err != nil {
 		t.Fatalf("Decode response: %v", err)
 	}
-	if resp.ID != "rid" || resp.Stream != StreamDisable {
+	if resp.ID != "rid" || resp.Stream != StreamOpen {
 		t.Fatalf("unexpected response payload: %+v", resp)
 	}
 	if got, want := string(resp.Result), "{}"; got != want {
@@ -727,8 +728,8 @@ func TestCodec_StreamSender_WriteResponse_SendsOpenAndCloseFrames(t *testing.T) 
 	if err := dec.Decode(&p1); err != nil {
 		t.Fatalf("Decode stream open: %v", err)
 	}
-	if p1.ID != "rid" || p1.Stream != StreamOpen {
-		t.Fatalf("unexpected stream open: %+v", p1)
+	if p1.ID != "rid" || p1.Stream != StreamSync {
+		t.Fatalf("unexpected stream sync: %+v", p1)
 	}
 	if got, want := string(p1.Data), `"x"`; got != want {
 		t.Fatalf("unexpected stream data: got %q want %q", got, want)
@@ -751,18 +752,30 @@ func TestCodec_StreamReceiver_Request_EarlyFramesDeliveredAfterRegisterAndWake(t
 	defer c2.Close()
 
 	enc := json.NewEncoder(c2)
-	if err := enc.Encode(Payload{
-		Version: JSONRPC2Version,
-		ID:      "1",
-		Method:  "prompt",
-		Params:  json.RawMessage("{}"),
-	}); err != nil {
-		t.Fatalf("Encode request: %v", err)
-	}
+
+	encodeReqErr := make(chan error, 1)
+	go func() {
+		encodeReqErr <- enc.Encode(Payload{
+			Version: JSONRPC2Version,
+			ID:      "1",
+			Method:  "prompt",
+			Stream:  StreamOpen,
+			Params:  json.RawMessage("{}"),
+		})
+	}()
 
 	var req rpc.Request
 	if err := codec.ReadRequestHeader(&req); err != nil {
 		t.Fatalf("ReadRequestHeader: %v", err)
+	}
+
+	select {
+	case err := <-encodeReqErr:
+		if err != nil {
+			t.Fatalf("Encode request: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for Encode request")
 	}
 	if req.ServiceMethod != "Transport.Prompt" {
 		t.Fatalf("unexpected ServiceMethod: %q", req.ServiceMethod)
@@ -772,7 +785,7 @@ func TestCodec_StreamReceiver_Request_EarlyFramesDeliveredAfterRegisterAndWake(t
 	if err := enc.Encode(Payload{
 		Version: JSONRPC2Version,
 		ID:      "1",
-		Stream:  StreamOpen,
+		Stream:  StreamSync,
 		Data:    json.RawMessage(`"hello"`),
 	}); err != nil {
 		t.Fatalf("Encode stream open: %v", err)
@@ -825,18 +838,30 @@ func TestCodec_StreamReceiver_Request_WakeBeforeFrame_RequeueEventuallyDelivers(
 	defer c2.Close()
 
 	enc := json.NewEncoder(c2)
-	if err := enc.Encode(Payload{
-		Version: JSONRPC2Version,
-		ID:      "1",
-		Method:  "prompt",
-		Params:  json.RawMessage("{}"),
-	}); err != nil {
-		t.Fatalf("Encode request: %v", err)
-	}
+
+	encodeReqErr := make(chan error, 1)
+	go func() {
+		encodeReqErr <- enc.Encode(Payload{
+			Version: JSONRPC2Version,
+			ID:      "1",
+			Method:  "prompt",
+			Stream:  StreamOpen,
+			Params:  json.RawMessage("{}"),
+		})
+	}()
 
 	var req rpc.Request
 	if err := codec.ReadRequestHeader(&req); err != nil {
 		t.Fatalf("ReadRequestHeader: %v", err)
+	}
+
+	select {
+	case err := <-encodeReqErr:
+		if err != nil {
+			t.Fatalf("Encode request: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for Encode request")
 	}
 
 	receiver := newTestStreamReceiver(1)
@@ -851,7 +876,7 @@ func TestCodec_StreamReceiver_Request_WakeBeforeFrame_RequeueEventuallyDelivers(
 	if err := enc.Encode(Payload{
 		Version: JSONRPC2Version,
 		ID:      "1",
-		Stream:  StreamOpen,
+		Stream:  StreamSync,
 		Data:    json.RawMessage(`"late"`),
 	}); err != nil {
 		t.Fatalf("Encode stream open: %v", err)
@@ -896,17 +921,29 @@ func TestCodec_StreamReceiver_Response_EarlyFramesDeliveredAfterRegisterAndWake(
 	codec.clilock.Unlock()
 
 	enc := json.NewEncoder(c2)
-	if err := enc.Encode(Payload{
-		Version: JSONRPC2Version,
-		ID:      "rid",
-		Result:  json.RawMessage("{}"),
-	}); err != nil {
-		t.Fatalf("Encode response: %v", err)
-	}
+
+	encodeRespErr := make(chan error, 1)
+	go func() {
+		encodeRespErr <- enc.Encode(Payload{
+			Version: JSONRPC2Version,
+			ID:      "rid",
+			Stream:  StreamOpen,
+			Result:  json.RawMessage("{}"),
+		})
+	}()
 
 	var r rpc.Response
 	if err := codec.ReadResponseHeader(&r); err != nil {
 		t.Fatalf("ReadResponseHeader: %v", err)
+	}
+
+	select {
+	case err := <-encodeRespErr:
+		if err != nil {
+			t.Fatalf("Encode response: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for Encode response")
 	}
 	if r.ServiceMethod != "Transport.Prompt" || r.Seq != 42 {
 		t.Fatalf("unexpected response header: %+v", r)
@@ -916,7 +953,7 @@ func TestCodec_StreamReceiver_Response_EarlyFramesDeliveredAfterRegisterAndWake(
 	if err := enc.Encode(Payload{
 		Version: JSONRPC2Version,
 		ID:      "rid",
-		Stream:  StreamOpen,
+		Stream:  StreamSync,
 		Data:    json.RawMessage(`"r1"`),
 	}); err != nil {
 		t.Fatalf("Encode stream open: %v", err)
@@ -955,19 +992,102 @@ func TestCodec_StreamReceiver_Response_EarlyFramesDeliveredAfterRegisterAndWake(
 	}
 }
 
+func TestCodec_Stream_WaitStreamTimeout_UnregisteredReceiver_DropsPending(t *testing.T) {
+	c1, c2 := net.Pipe()
+	codec := newTestCodec(c1, WaitStreamTimeout(200*time.Millisecond))
+	defer codec.Close()
+	defer c2.Close()
+
+	enc := json.NewEncoder(c2)
+
+	encodeReqErr := make(chan error, 1)
+	go func() {
+		encodeReqErr <- enc.Encode(Payload{
+			Version: JSONRPC2Version,
+			ID:      "1",
+			Method:  "prompt",
+			Stream:  StreamOpen,
+			Params:  json.RawMessage("{}"),
+		})
+	}()
+
+	// Drain the request, but do not register a StreamReceiver.
+	var req rpc.Request
+	if err := codec.ReadRequestHeader(&req); err != nil {
+		t.Fatalf("ReadRequestHeader: %v", err)
+	}
+
+	select {
+	case err := <-encodeReqErr:
+		if err != nil {
+			t.Fatalf("Encode request: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for Encode request")
+	}
+	if err := codec.ReadRequestBody(nil); err != nil {
+		t.Fatalf("ReadRequestBody: %v", err)
+	}
+
+	// Enqueue some stream frames while the receiver is still only a nil placeholder.
+	if err := enc.Encode(Payload{
+		Version: JSONRPC2Version,
+		ID:      "1",
+		Stream:  StreamSync,
+		Data:    json.RawMessage(`"x"`),
+	}); err != nil {
+		t.Fatalf("Encode stream sync: %v", err)
+	}
+	if err := enc.Encode(Payload{
+		Version: JSONRPC2Version,
+		ID:      "1",
+		Stream:  StreamSync,
+		Data:    json.RawMessage(`"y"`),
+	}); err != nil {
+		t.Fatalf("Encode stream sync: %v", err)
+	}
+
+	waitUntil(t, 2*time.Second, func() bool {
+		codec.receiverlock.RLock()
+		_, ok := codec.receivers["1"]
+		codec.receiverlock.RUnlock()
+		return !ok
+	})
+}
+
 func TestCodec_Stream_NullPayload_IsIgnored(t *testing.T) {
 	c1, c2 := net.Pipe()
 	codec := newTestCodec(c1)
 	defer codec.Close()
 	defer c2.Close()
 
-	_, _ = io.WriteString(c2, "null\n")
-	_, _ = io.WriteString(c2, "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"prompt\",\"params\":{}}\n")
+	writeErr := make(chan error, 1)
+	go func() {
+		if _, err := io.WriteString(c2, "null\n"); err != nil {
+			writeErr <- err
+			return
+		}
+		if _, err := io.WriteString(c2, "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"prompt\",\"params\":{}}\n"); err != nil {
+			writeErr <- err
+			return
+		}
+		writeErr <- nil
+	}()
 
 	var req rpc.Request
 	if err := codec.ReadRequestHeader(&req); err != nil {
 		t.Fatalf("ReadRequestHeader: %v", err)
 	}
+
+	select {
+	case err := <-writeErr:
+		if err != nil {
+			t.Fatalf("WriteString: %v", err)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatalf("timeout waiting for peer writes")
+	}
+
 	if req.ServiceMethod != "Transport.Prompt" {
 		t.Fatalf("unexpected ServiceMethod: %q", req.ServiceMethod)
 	}

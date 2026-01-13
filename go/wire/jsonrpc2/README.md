@@ -25,21 +25,32 @@ If `method` is non-empty, the message is treated as a request; otherwise it is t
 
 `Payload` adds two extra fields:
 
-- `stream` (int, omitempty): stream frame type
+- `stream` (int, omitempty): stream state / frame type
 - `data` (json.RawMessage, omitempty): stream data payload
 
 Constants (see `go/wire/jsonrpc2/codec.go`):
 
-- `StreamDisable = 0`: not a stream frame (normal request/response)
-- `StreamOpen = 1`: a stream data frame
-- `StreamClose = -1`: end-of-stream (EOF)
+- `StreamDisable = 0`: normal request/response, no stream expected
+- `StreamOpen = 1`: stream is enabled for this `id` (declared on the **base** request/response)
+- `StreamSync = 2`: stream data frame
+- `StreamClose = 3`: end-of-stream (EOF) frame
 
 ### 2.2 Wire semantics
 
-If `stream != StreamDisable`, the message is treated as a **stream frame** (not a request/response):
+The `stream` field is used in two different ways:
+
+1) **Stream-enabled base message** (`stream == StreamOpen`)
+
+- This is still a normal JSON-RPC request/response (it may contain `method`/`params` or `result`/`error`).
+- It declares that this `id` may have subsequent stream frames multiplexed on the same connection.
+- It allows early-arriving stream frames to be buffered for later delivery.
+
+2) **Stream frame** (`stream > StreamOpen`)
+
+If `stream > StreamOpen`, the message is treated as a stream frame (not a request/response):
 
 - `id`: identifies which stream this frame belongs to (shares the same `id` namespace with request/response)
-- `stream = StreamOpen`: data frame
+- `stream = StreamSync`: data frame
   - `data`: the frame content (`json.RawMessage`)
 - `stream = StreamClose`: EOF frame
   - `data` is typically omitted
@@ -49,6 +60,20 @@ If `stream != StreamDisable`, the message is treated as a **stream frame** (not 
 If a single connection is used bi-directionally (a `Codec` acts as both client and server), then both sides **must ensure `id` is globally unique across both directions**.
 
 Otherwise, stream multiplexing may conflict (frames can be routed to the wrong receiver).
+
+### 2.4 Timeout / cleanup (`WaitStreamTimeout`)
+
+To mitigate unbounded in-memory buffering when a peer misbehaves (e.g. declares `StreamOpen` and then sends stream frames but the receiver is never registered / never wakes), the codec can be configured with a stream timeout:
+
+```go
+codec := NewCodec(rwc, WaitStreamTimeout(30*time.Second))
+```
+
+If unset, it defaults to **30 seconds**.
+
+Once the timeout triggers, the codec removes the receiver mapping for that `id` and triggers a cleanup attempt for pending stream frames for the same `id`.
+
+> Design note: This is a best-effort safety net. It does not provide a hard memory cap under sustained high-rate streaming.
 
 ## 3. StreamSender (sending side)
 
@@ -64,9 +89,10 @@ If the request params or response result value implements `StreamSender`, the co
 
 1. Call `Sender(wake)` to obtain a read-only channel.
 2. Register that channel in `senders[id]`.
-3. When `wake()` is called by the implementation, the codec will try to send exactly one stream frame:
-   - If a data item is received from the channel: send `{ "id": ..., "stream": 1, "data": ... }`.
-   - If the channel is closed: send `{ "id": ..., "stream": -1 }` and remove the sender.
+3. Mark the **base** request/response as stream-enabled by setting `stream = StreamOpen`.
+4. When `wake()` is called by the implementation, the codec will try to send exactly one stream frame:
+   - If a data item is received from the channel: send `{ "id": ..., "stream": 2, "data": ... }`.
+   - If the channel is closed: send `{ "id": ..., "stream": 3 }` and remove the sender.
 
 ### 3.2 Sender contracts (must follow)
 
@@ -87,7 +113,7 @@ type StreamReceiver interface {
 
 If the request params or response result value implements `StreamReceiver`, the codec will:
 
-1. Call `Receiver(wake)` to obtain a write channel.
+1. Only if the corresponding base request/response has `stream = StreamOpen`, call `Receiver(wake)` to obtain a write channel.
 2. Register that channel in `receivers[id]`.
 3. When stream frames for that `id` arrive, the codec will deliver them **only when** the receiver calls `wake()`.
 
@@ -102,13 +128,13 @@ If the request params or response result value implements `StreamReceiver`, the 
 
 ## 5. Pending queue and early/late arrival
 
-Stream frames may arrive before a receiver is registered. To handle this, all `stream != 0` frames are first appended into an in-memory pending list (`pendingstreams`).
+Stream frames may arrive before a receiver is registered. To handle this, stream frames (`stream > StreamOpen`) are appended into an in-memory pending list (`pendingstreams`) **only for ids that have been opened** (i.e. a `StreamOpen` base message has established a receiver entry for that `id`).
 
 When the receiver calls `wake()`:
 
 - The codec searches the pending list for the first element with `payload.ID == id`.
 - If found:
-  - `StreamOpen`: deliver `payload.Data` to the receiver channel and remove the pending element.
+  - `StreamSync`: deliver `payload.Data` to the receiver channel and remove the pending element.
   - `StreamClose`: close the receiver channel, remove the receiver mapping, and remove the pending element.
 - If not found (wake happens before frames arrive): the codec schedules a `requeue` for that `id` and tries again later.
 

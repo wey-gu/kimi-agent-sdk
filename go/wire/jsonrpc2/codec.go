@@ -33,6 +33,7 @@ func NewCodec(rwc io.ReadWriteCloser, options ...CodecOption) *Codec {
 		senderwaker:   make(chan string),
 		receivers:     make(map[string]chan<- json.RawMessage),
 		receiverwaker: make(chan string),
+		receivetime:   make(map[string]time.Time),
 	}
 	for _, apply := range options {
 		apply(codec)
@@ -68,11 +69,18 @@ func ShutdownTimeout(timeout time.Duration) CodecOption {
 	}
 }
 
+func WaitStreamTimeout(timeout time.Duration) CodecOption {
+	return func(codec *Codec) {
+		codec.waitStreamTimeout = timeout
+	}
+}
+
 type Codec struct {
 	clientMethodRenamer Renamer
 	serverMethodRenamer Renamer
 	jsonidGenerator     Generator[string]
 	shutdownTimeout     time.Duration
+	waitStreamTimeout   time.Duration
 
 	donectx context.Context
 	cancel  context.CancelFunc
@@ -108,6 +116,7 @@ type Codec struct {
 	receiverlock  sync.RWMutex
 	receivers     map[string]chan<- json.RawMessage
 	receiverwaker chan string
+	receivetime   map[string]time.Time
 
 	inreqs chan Request
 	inress chan Response
@@ -126,6 +135,51 @@ func (c *Codec) loadOrFallbackErr(fallback error) error {
 		}
 	}
 	return fallback
+}
+
+func (c *Codec) watchidle(receiverid string) {
+	closereceiver := func() {
+		c.receiverlock.Lock()
+		delete(c.receivers, receiverid)
+		delete(c.receivetime, receiverid)
+		c.receiverlock.Unlock()
+		select {
+		case c.receiverwaker <- receiverid:
+		case <-c.donectx.Done():
+		}
+	}
+	timeout := c.waitStreamTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	ticker := time.NewTicker(timeout)
+	defer ticker.Stop()
+	for {
+		select {
+		case tktime := <-ticker.C:
+			c.receiverlock.RLock()
+			receiver, ok := c.receivers[receiverid]
+			c.receiverlock.RUnlock()
+			if !ok {
+				closereceiver()
+				return
+			}
+			if receiver == nil {
+				closereceiver()
+				return
+			} else {
+				c.receiverlock.RLock()
+				rctime := c.receivetime[receiverid]
+				c.receiverlock.RUnlock()
+				if tktime.Sub(rctime) > timeout {
+					closereceiver()
+					return
+				}
+			}
+		case <-c.donectx.Done():
+			return
+		}
+	}
 }
 
 func (c *Codec) send() {
@@ -154,7 +208,7 @@ func (c *Codec) send() {
 					payload = &Payload{
 						Version: JSONRPC2Version,
 						ID:      senderid,
-						Stream:  StreamOpen,
+						Stream:  StreamSync,
 						Data:    data,
 					}
 				}
@@ -200,6 +254,18 @@ func (c *Codec) recv() {
 		defer pendinglock.Unlock()
 		pendingstreams.Remove(element)
 	}
+	cleanup := func(id string) {
+		pendinglock.Lock()
+		defer pendinglock.Unlock()
+		for element := pendingstreams.Front(); element != nil; {
+			next := element.Next()
+			payload := element.Value.(*Payload)
+			if payload.ID == id {
+				pendingstreams.Remove(element)
+			}
+			element = next
+		}
+	}
 	enqueue := func(payload *Payload) {
 		pendinglock.Lock()
 		defer pendinglock.Unlock()
@@ -220,30 +286,35 @@ func (c *Codec) recv() {
 		for {
 			select {
 			case receiverid := <-c.receiverwaker:
-				if element := fdelement(receiverid); element != nil {
-					payload := element.Value.(*Payload)
-					c.receiverlock.RLock()
-					receiver, ok := c.receivers[payload.ID]
-					c.receiverlock.RUnlock()
-					if ok {
-						if payload.Stream == StreamClose {
-							c.receiverlock.Lock()
-							close(receiver)
-							delete(c.receivers, payload.ID)
-							c.receiverlock.Unlock()
-							rmelement(element)
-						} else {
-							select {
-							case receiver <- payload.Data:
-								rmelement(element)
-							case <-c.donectx.Done():
-								return
-							}
-						}
-					}
-				} else {
+				element := fdelement(receiverid)
+				if element == nil {
 					go requeue(receiverid)
+					continue
 				}
+				payload := element.Value.(*Payload)
+				c.receiverlock.RLock()
+				receiver, ok := c.receivers[payload.ID]
+				c.receiverlock.RUnlock()
+				if !ok {
+					cleanup(receiverid)
+					continue
+				}
+				if payload.Stream == StreamClose {
+					c.receiverlock.Lock()
+					close(receiver)
+					delete(c.receivers, payload.ID)
+					c.receiverlock.Unlock()
+				} else {
+					select {
+					case receiver <- payload.Data:
+						c.receiverlock.Lock()
+						c.receivetime[receiverid] = time.Now()
+						c.receiverlock.Unlock()
+					case <-c.donectx.Done():
+						return
+					}
+				}
+				rmelement(element)
 			case <-c.donectx.Done():
 				return
 			}
@@ -258,21 +329,34 @@ func (c *Codec) recv() {
 			return
 		}
 		if payload != nil {
-			if payload.Stream != StreamDisable {
-				enqueue(payload)
-			} else if payload.Method != "" {
-				c.inflight.Add(1)
-				select {
-				case c.inreqs <- payload:
-				case <-c.donectx.Done():
-					c.inflight.Add(-1)
-					return
+			if payload.Stream > StreamOpen {
+				c.receiverlock.RLock()
+				_, ok := c.receivers[payload.ID]
+				c.receiverlock.RUnlock()
+				if ok {
+					enqueue(payload)
 				}
 			} else {
-				select {
-				case c.inress <- payload:
-				case <-c.donectx.Done():
-					return
+				if payload.Stream == StreamOpen {
+					c.receiverlock.Lock()
+					c.receivers[payload.ID] = nil
+					c.receiverlock.Unlock()
+					go c.watchidle(payload.ID)
+				}
+				if payload.Method != "" {
+					c.inflight.Add(1)
+					select {
+					case c.inreqs <- payload:
+					case <-c.donectx.Done():
+						c.inflight.Add(-1)
+						return
+					}
+				} else {
+					select {
+					case c.inress <- payload:
+					case <-c.donectx.Done():
+						return
+					}
 				}
 			}
 		}
@@ -313,12 +397,16 @@ func (c *Codec) ReadRequestBody(x any) error {
 	reqid := c.thisreq.GetID()
 	if receiver, ok := x.(StreamReceiver); ok {
 		c.receiverlock.Lock()
-		c.receivers[reqid] = receiver.Receiver(func() {
-			select {
-			case c.receiverwaker <- reqid:
-			case <-c.donectx.Done():
-			}
-		})
+		if c.thisreq.GetStream() == StreamOpen {
+			c.receivers[reqid] = receiver.Receiver(func() {
+				select {
+				case c.receiverwaker <- reqid:
+				case <-c.donectx.Done():
+				}
+			})
+		} else {
+			delete(c.receivers, reqid)
+		}
 		c.receiverlock.Unlock()
 	}
 	return nil
@@ -334,25 +422,31 @@ func (c *Codec) WriteResponse(r *rpc.Response, x any) error {
 	reqid := c.srvreqids[r.Seq]
 	c.srvlock.Unlock()
 	if reqid != "" {
-		if sender, ok := x.(StreamSender); ok {
-			c.senderlock.Lock()
-			c.senders[reqid] = sender.Sender(func() {
-				select {
-				case c.senderwaker <- reqid:
-				case <-c.donectx.Done():
-				}
-			})
-			c.senderlock.Unlock()
-		}
 		if r.Error == "" {
+			sender, streamopen := x.(StreamSender)
+			if streamopen {
+				c.senderlock.Lock()
+				c.senders[reqid] = sender.Sender(func() {
+					select {
+					case c.senderwaker <- reqid:
+					case <-c.donectx.Done():
+					}
+				})
+				c.senderlock.Unlock()
+			}
 			result, err := json.Marshal(x)
 			if err != nil {
 				return c.loadOrFallbackErr(err)
+			}
+			var stream int
+			if streamopen {
+				stream = StreamOpen
 			}
 			select {
 			case c.outpls <- &Payload{
 				Version: JSONRPC2Version,
 				ID:      reqid,
+				Stream:  stream,
 				Result:  result,
 			}:
 			case <-c.donectx.Done():
@@ -392,7 +486,8 @@ func (c *Codec) WriteRequest(r *rpc.Request, x any) error {
 	c.clireqids[reqid] = r.Seq
 	c.reqmeth[reqid] = r.ServiceMethod
 	c.clilock.Unlock()
-	if sender, ok := x.(StreamSender); ok {
+	sender, streamopen := x.(StreamSender)
+	if streamopen {
 		c.senderlock.Lock()
 		c.senders[reqid] = sender.Sender(func() {
 			select {
@@ -408,11 +503,16 @@ func (c *Codec) WriteRequest(r *rpc.Request, x any) error {
 	} else {
 		method = r.ServiceMethod
 	}
+	var stream int
+	if streamopen {
+		stream = StreamOpen
+	}
 	select {
 	case c.outpls <- &Payload{
 		Version: JSONRPC2Version,
 		Method:  method,
 		ID:      reqid,
+		Stream:  stream,
 		Params:  params,
 	}:
 	case <-c.donectx.Done():
@@ -454,12 +554,16 @@ func (c *Codec) ReadResponseBody(x any) error {
 	resid := c.thisres.GetID()
 	if receiver, ok := x.(StreamReceiver); ok {
 		c.receiverlock.Lock()
-		c.receivers[resid] = receiver.Receiver(func() {
-			select {
-			case c.receiverwaker <- resid:
-			case <-c.donectx.Done():
-			}
-		})
+		if c.thisres.GetStream() == StreamOpen {
+			c.receivers[resid] = receiver.Receiver(func() {
+				select {
+				case c.receiverwaker <- resid:
+				case <-c.donectx.Done():
+				}
+			})
+		} else {
+			delete(c.receivers, resid)
+		}
 		c.receiverlock.Unlock()
 	}
 	return nil
@@ -531,6 +635,7 @@ type Payload struct {
 
 func (p *Payload) GetID() string              { return p.ID }
 func (p *Payload) GetMethod() string          { return p.Method }
+func (p *Payload) GetStream() int             { return p.Stream }
 func (p *Payload) GetData() json.RawMessage   { return p.Data }
 func (p *Payload) GetParams() json.RawMessage { return p.Params }
 func (p *Payload) GetResult() json.RawMessage { return p.Result }
@@ -539,17 +644,20 @@ func (p *Payload) GetError() json.RawMessage  { return p.Error }
 type Request interface {
 	GetID() string
 	GetMethod() string
+	GetStream() int
 	GetParams() json.RawMessage
 }
 
 type Response interface {
 	GetID() string
+	GetStream() int
 	GetResult() json.RawMessage
 	GetError() json.RawMessage
 }
 
 type Stream interface {
 	GetID() string
+	GetStream() int
 	GetData() json.RawMessage
 }
 
@@ -564,9 +672,10 @@ func (f RenamerFunc) Rename(s string) string { return f(s) }
 func (f GeneratorFunc[T]) Generate() T       { return f() }
 
 const (
-	StreamDisable = 0
-	StreamOpen    = 1
-	StreamClose   = -1
+	StreamDisable = iota
+	StreamOpen
+	StreamSync
+	StreamClose
 )
 
 type StreamSender interface {
