@@ -47,7 +47,7 @@ func TestTransportClient_Prompt(t *testing.T) {
 	defer cleanup()
 
 	result, err := client.Prompt(&wire.PromptParams{
-		UserInput: wire.NewStringUserInput("hello"),
+		UserInput: wire.NewStringContent("hello"),
 	})
 
 	if err != nil {
@@ -158,7 +158,7 @@ func TestTransportClient_Prompt_Error(t *testing.T) {
 	defer cleanup()
 
 	_, err := client.Prompt(&wire.PromptParams{
-		UserInput: wire.NewStringUserInput("hello"),
+		UserInput: wire.NewStringContent("hello"),
 	})
 
 	if err == nil {
@@ -178,7 +178,7 @@ func TestTransportServer_Prompt(t *testing.T) {
 	srv := NewTransportServer(mockImpl)
 
 	arg := &wire.PromptParams{
-		UserInput: wire.NewStringUserInput("hello"),
+		UserInput: wire.NewStringContent("hello"),
 	}
 	reply := &wire.PromptResult{}
 

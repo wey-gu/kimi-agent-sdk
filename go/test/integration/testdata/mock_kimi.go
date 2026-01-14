@@ -10,6 +10,7 @@
 //   deadlock - sends ApprovalRequest then immediately completes prompt
 //   flood - sends many events rapidly
 //   prompt_error - sends TurnBegin then returns a JSONRPC error
+//   tool_call - sends ExternalToolCallRequest and waits for response
 
 package main
 
@@ -67,6 +68,8 @@ func main() {
 		}
 
 		switch req.Method {
+		case "init":
+			handleInit(encoder, req.ID)
 		case "prompt":
 			switch mode {
 			case "deadlock":
@@ -75,6 +78,8 @@ func main() {
 				handlePromptFlood(encoder, req.ID)
 			case "prompt_error":
 				handlePromptError(encoder, req.ID)
+			case "tool_call":
+				handlePromptToolCall(encoder, scanner, req.ID)
 			default:
 				handlePrompt(encoder, req.ID)
 			}
@@ -82,6 +87,14 @@ func main() {
 			handleCancel(encoder, req.ID)
 		}
 	}
+}
+
+func handleInit(encoder *json.Encoder, reqID string) {
+	encoder.Encode(Payload{
+		Version: "2.0",
+		ID:      reqID,
+		Result:  json.RawMessage(`{}`),
+	})
 }
 
 func handlePrompt(encoder *json.Encoder, reqID string) {
@@ -236,6 +249,54 @@ func handlePromptError(encoder *json.Encoder, reqID string) {
 		Version: "2.0",
 		ID:      reqID,
 		Error:   json.RawMessage(`{"code":-32000,"message":"simulated prompt error"}`),
+	})
+}
+
+// handlePromptToolCall sends an ExternalToolCallRequest and waits for response.
+// This tests whether WithTools correctly registers tools and handles tool calls.
+func handlePromptToolCall(encoder *json.Encoder, scanner *bufio.Scanner, reqID string) {
+	// Send TurnBegin event
+	sendEvent(encoder, "TurnBegin", map[string]any{
+		"user_input": "test",
+	})
+
+	// Send StepBegin event
+	sendEvent(encoder, "StepBegin", map[string]any{
+		"n": 1,
+	})
+
+	// Send ExternalToolCallRequest
+	toolReqID := fmt.Sprintf("req-%d", requestID.Add(1))
+	payloadJSON, _ := json.Marshal(map[string]any{
+		"id":           "tool-req-1",
+		"tool_call_id": "call-123",
+		"type":         "function",
+		"function": map[string]any{
+			"name":      "test_tool",
+			"arguments": `{"input":"hello"}`,
+		},
+	})
+	paramsJSON, _ := json.Marshal(map[string]any{
+		"type":    "ExternalToolCallRequest",
+		"payload": json.RawMessage(payloadJSON),
+	})
+	encoder.Encode(Payload{
+		Version: "2.0",
+		ID:      toolReqID,
+		Method:  "request",
+		Params:  paramsJSON,
+	})
+
+	// Wait for and read SDK's response
+	if scanner.Scan() {
+		// Response received, continue
+	}
+
+	// Send prompt completion response
+	encoder.Encode(Payload{
+		Version: "2.0",
+		ID:      reqID,
+		Result:  json.RawMessage(`{"status":"finished","steps":1}`),
 	})
 }
 

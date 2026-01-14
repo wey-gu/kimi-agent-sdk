@@ -68,7 +68,7 @@ func TestEvent_EventTypeConstants(t *testing.T) {
 }
 
 func TestContent_JSONRoundTrip_Text(t *testing.T) {
-	in := NewStringUserInput("hello")
+	in := NewStringContent("hello")
 	b, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -90,7 +90,7 @@ func TestContent_JSONRoundTrip_Text(t *testing.T) {
 }
 
 func TestContent_JSONRoundTrip_ContentParts(t *testing.T) {
-	in := NewUserInput([]ContentPart{{Type: ContentPartTypeText, Text: "hi"}})
+	in := NewContent([]ContentPart{{Type: ContentPartTypeText, Text: "hi"}})
 	b, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -214,7 +214,7 @@ func TestApprovalRequest_MarshalJSON_IgnoresResponder(t *testing.T) {
 }
 
 func TestEventParams_UnmarshalJSON_AllEventTypes(t *testing.T) {
-	turn := TurnBegin{UserInput: NewStringUserInput("hi")}
+	turn := TurnBegin{UserInput: NewStringContent("hi")}
 	sub := SubagentEvent{
 		TaskToolCallID: "ttc",
 		Event: EventParams{
@@ -237,9 +237,9 @@ func TestEventParams_UnmarshalJSON_AllEventTypes(t *testing.T) {
 		{"ContentPart", EventTypeContentPart, ContentPart{Type: ContentPartTypeText, Text: "hello"}},
 		{"ToolCall", EventTypeToolCall, ToolCall{Type: "function", ID: "1", Function: ToolCallFunction{Name: "f"}}},
 		{"ToolCallPart", EventTypeToolCallPart, ToolCallPart{ArgumentsPart: Optional[string]{Value: "x", Valid: true}}},
-		{"ToolResult", EventTypeToolResult, ToolResult{ToolCallID: "1", ReturnValue: ToolResultReturnValue{IsError: false, Output: NewStringUserInput("ok"), Message: "m"}}},
+		{"ToolResult", EventTypeToolResult, ToolResult{ToolCallID: "1", ReturnValue: ToolResultReturnValue{IsError: false, Output: NewStringContent("ok"), Message: "m"}}},
 		{"SubagentEvent", EventTypeSubagentEvent, sub},
-		{"ApprovalRequestResolved", EventTypeApprovalRequestResolved, ApprovalRequestResolved{RequestResult: RequestResult{RequestID: "rid", Response: RequestResponseApprove}}},
+		{"ApprovalRequestResolved", EventTypeApprovalRequestResolved, ApprovalRequestResolved{RequestID: "rid", Response: RequestResponseApprove}},
 	}
 
 	for _, tc := range cases {

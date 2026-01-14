@@ -7,6 +7,12 @@ import (
 )
 
 type (
+	InitParams struct {
+		ExternalTools []ExternalTool `json:"external_tools"`
+	}
+	InitResult struct {
+		SlashCommands []string `json:"slash_commands"`
+	}
 	PromptParams struct {
 		UserInput Content `json:"user_input"`
 	}
@@ -48,6 +54,7 @@ func (ToolResult) message()              {}
 func (SubagentEvent) message()           {}
 func (ApprovalRequestResolved) message() {}
 func (ApprovalRequest) message()         {}
+func (ExternalToolCallRequest) message() {}
 
 type Event interface {
 	Message
@@ -133,6 +140,10 @@ type Request interface {
 	Responder
 }
 
+type RequestResponse interface {
+	requestResponse()
+}
+
 type Responder interface {
 	Respond(RequestResponse) error
 }
@@ -140,11 +151,17 @@ type Responder interface {
 type RequestType string
 
 const (
-	RequestTypeApprovalRequest RequestType = "ApprovalRequest"
+	RequestTypeApprovalRequest         RequestType = "ApprovalRequest"
+	RequestTypeExternalToolCallRequest RequestType = "ExternalToolCallRequest"
 )
 
-func (r ApprovalRequest) RequestType() RequestType { return RequestTypeApprovalRequest }
-func (r ApprovalRequest) RequestID() string        { return r.ID }
+func (r ApprovalRequest) RequestType() RequestType         { return RequestTypeApprovalRequest }
+func (r ApprovalRequest) RequestID() string                { return r.ID }
+func (r ExternalToolCallRequest) RequestType() RequestType { return RequestTypeExternalToolCallRequest }
+func (r ExternalToolCallRequest) RequestID() string        { return r.ID }
+
+func (r ApprovalRequestResponse) requestResponse()         {}
+func (r ExternalToolCallRequestResponse) requestResponse() {}
 
 func unmarshalRequest[R Request](data []byte) (Request, error) {
 	var request R
@@ -155,7 +172,8 @@ func unmarshalRequest[R Request](data []byte) (Request, error) {
 }
 
 var requestUnmarshaler = map[RequestType]func(data []byte) (Request, error){
-	RequestTypeApprovalRequest: unmarshalRequest[ApprovalRequest],
+	RequestTypeApprovalRequest:         unmarshalRequest[ApprovalRequest],
+	RequestTypeExternalToolCallRequest: unmarshalRequest[ExternalToolCallRequest],
 }
 
 func (params *RequestParams) UnmarshalJSON(data []byte) (err error) {
@@ -186,14 +204,14 @@ var (
 	PromptResultStatusMaxStepsReached PromptResultStatus = "max_steps_reached"
 )
 
-func NewUserInput(contentParts []ContentPart) Content {
+func NewContent(contentParts []ContentPart) Content {
 	return Content{
 		Type:         ContentTypeContentParts,
 		ContentParts: contentParts,
 	}
 }
 
-func NewStringUserInput(text string) Content {
+func NewStringContent(text string) Content {
 	return Content{
 		Type: ContentTypeText,
 		Text: text,
@@ -322,7 +340,7 @@ type ToolResult struct {
 type ToolResultReturnValue struct {
 	IsError bool                     `json:"is_error"`
 	Output  Content                  `json:"output"`
-	Message string                   `json:"message"`
+	Message string                   `json:"message,omitzero"`
 	Display []DisplayBlock           `json:"display,omitzero"`
 	Extras  Optional[map[string]any] `json:"extras,omitzero"`
 }
@@ -332,16 +350,9 @@ type SubagentEvent struct {
 	Event          EventParams `json:"event"`
 }
 
-type RequestResponse string
-
-const (
-	RequestResponseApprove           RequestResponse = "approve"
-	RequestResponseApproveForSession RequestResponse = "approve_for_session"
-	RequestResponseReject            RequestResponse = "reject"
-)
-
 type ApprovalRequestResolved struct {
-	RequestResult
+	RequestID string                  `json:"request_id"`
+	Response  ApprovalRequestResponse `json:"response"`
 }
 
 type ApprovalRequest struct {
@@ -352,6 +363,27 @@ type ApprovalRequest struct {
 	Action      string         `json:"action"`
 	Description string         `json:"description"`
 	Display     []DisplayBlock `json:"display,omitzero"`
+}
+
+type ApprovalRequestResponse string
+
+const (
+	RequestResponseApprove           ApprovalRequestResponse = "approve"
+	RequestResponseApproveForSession ApprovalRequestResponse = "approve_for_session"
+	RequestResponseReject            ApprovalRequestResponse = "reject"
+)
+
+type ExternalToolCallRequest struct {
+	Responder  `json:"-"`
+	ID         string                   `json:"id"`
+	ToolCallID string                   `json:"tool_call_id"`
+	Type       string                   `json:"type"`
+	Function   ToolCallFunction         `json:"function"`
+	Extras     Optional[map[string]any] `json:"extras,omitzero"`
+}
+
+type ExternalToolCallRequestResponse struct {
+	ToolResult
 }
 
 type DisplayBlockType string
@@ -384,6 +416,17 @@ const (
 type DisplayBlockTodoItem struct {
 	Title  string     `json:"title"`
 	Status TodoStatus `json:"status"`
+}
+
+type ExternalTool struct {
+	Type     string                         `json:"type"`
+	Function Optional[ExternalToolFunction] `json:"function,omitzero"`
+}
+
+type ExternalToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 func (o Optional[T]) MarshalJSON() ([]byte, error) {

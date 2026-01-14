@@ -12,13 +12,22 @@ func ParseError(err error) (Error, bool) {
 
 type ErrorCode int
 
+const (
+	ErrorCodeInvalidRequest ErrorCode = -32600
+	ErrorCodeMethodNotFound ErrorCode = -32601
+	ErrorCodeInvalidParams  ErrorCode = -32602
+	ErrorCodeInternalError  ErrorCode = -32603
+)
+
 type Error struct {
 	Code    ErrorCode `json:"code"`
 	Message string    `json:"message"`
 }
 
 func (e Error) Error() string {
-	return e.Message
+	// SAFETY: Error only contains int and string fields, which cannot fail to marshal.
+	jsonerror, _ := json.Marshal(&e)
+	return string(jsonerror)
 }
 
 func ParseServerError[E error](err error) (e E, ok bool) {

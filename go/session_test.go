@@ -148,13 +148,10 @@ func TestResponder_Request_NilMsgs(t *testing.T) {
 		Payload: approvalRequest,
 	}
 
-	result, err := responder.Request(request)
-	if err != nil {
-		t.Fatalf("Request: %v", err)
-	}
-	// Should return Reject when msgs is nil
-	if result.Response != wire.RequestResponseReject {
-		t.Errorf("expected response 'reject', got %s", result.Response)
+	_, err := responder.Request(request)
+	// Should return error when wireMessageBridge is nil
+	if err == nil {
+		t.Fatal("expected error when wireMessageBridge is nil, got nil")
 	}
 }
 

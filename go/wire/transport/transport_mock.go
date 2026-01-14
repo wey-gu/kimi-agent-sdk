@@ -70,6 +70,21 @@ func (mr *MockTransportMockRecorder) Event(event any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Event", reflect.TypeOf((*MockTransport)(nil).Event), event)
 }
 
+// Init mocks base method.
+func (m *MockTransport) Init(params *wire.InitParams) (*wire.InitResult, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Init", params)
+	ret0, _ := ret[0].(*wire.InitResult)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Init indicates an expected call of Init.
+func (mr *MockTransportMockRecorder) Init(params any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Init", reflect.TypeOf((*MockTransport)(nil).Init), params)
+}
+
 // Prompt mocks base method.
 func (m *MockTransport) Prompt(params *wire.PromptParams) (*wire.PromptResult, error) {
 	m.ctrl.T.Helper()

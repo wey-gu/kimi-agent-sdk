@@ -57,7 +57,7 @@ func TestIntegration_RoundTrip_SimpleMessage(t *testing.T) {
 	}
 	defer session.Close()
 
-	turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("test input"))
+	turn, err := session.Prompt(context.Background(), wire.NewStringContent("test input"))
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestIntegration_Turn_Steps_Channel(t *testing.T) {
 	}
 	defer session.Close()
 
-	turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("test"))
+	turn, err := session.Prompt(context.Background(), wire.NewStringContent("test"))
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestIntegration_StatusUpdate_Usage(t *testing.T) {
 	}
 	defer session.Close()
 
-	turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("test"))
+	turn, err := session.Prompt(context.Background(), wire.NewStringContent("test"))
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestIntegration_Deadlock_RequestCleanup(t *testing.T) {
 		}
 		defer session.Close()
 
-		turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("test"))
+		turn, err := session.Prompt(context.Background(), wire.NewStringContent("test"))
 		if err != nil {
 			// Error is expected if deadlock is avoided by rejecting the request
 			t.Logf("RoundTrip returned error (expected): %v", err)
@@ -278,7 +278,7 @@ func TestIntegration_EventBlocking(t *testing.T) {
 		}
 		defer session.Close()
 
-		turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("test"))
+		turn, err := session.Prompt(context.Background(), wire.NewStringContent("test"))
 		if err != nil {
 			testErr = err
 			return
@@ -337,7 +337,7 @@ func TestIntegration_Turn_Err_PromptError(t *testing.T) {
 	var rpcErr error
 
 	// RoundTrip should return a turn (since TurnBegin is sent before the error)
-	turn, err := session.Prompt(context.Background(), wire.NewStringUserInput("test"))
+	turn, err := session.Prompt(context.Background(), wire.NewStringContent("test"))
 	if err != nil {
 		if !strings.Contains(err.Error(), "simulated prompt error") {
 			t.Fatalf("RoundTrip: expected turn to be returned, got error: %v", err)
@@ -386,7 +386,7 @@ func TestIntegration_ConcurrentRoundTrips(t *testing.T) {
 	// This test documents the expected behavior
 
 	// First RoundTrip
-	turn1, err := session.Prompt(context.Background(), wire.NewStringUserInput("first"))
+	turn1, err := session.Prompt(context.Background(), wire.NewStringContent("first"))
 	if err != nil {
 		t.Fatalf("First RoundTrip: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestIntegration_ConcurrentRoundTrips(t *testing.T) {
 	turn1.Cancel()
 
 	// Second RoundTrip (sequential, after first completes)
-	turn2, err := session.Prompt(context.Background(), wire.NewStringUserInput("second"))
+	turn2, err := session.Prompt(context.Background(), wire.NewStringContent("second"))
 	if err != nil {
 		t.Fatalf("Second RoundTrip: %v", err)
 	}
@@ -424,4 +424,72 @@ func TestIntegration_ConcurrentRoundTrips(t *testing.T) {
 	turn2.Cancel()
 
 	t.Log("Sequential RoundTrips completed successfully")
+}
+
+// testToolArgs is the argument type for test tool
+type testToolArgs struct {
+	Input string `json:"input"`
+}
+
+// testToolResult is the result type for test tool (implements fmt.Stringer)
+type testToolResult string
+
+func (r testToolResult) String() string { return string(r) }
+
+// TestIntegration_WithTools_ExternalToolCall tests that WithTools correctly
+// registers tools and handles ExternalToolCallRequest from the CLI.
+func TestIntegration_WithTools_ExternalToolCall(t *testing.T) {
+	mockPath := getMockKimiPath(t)
+
+	var called bool
+	var receivedInput string
+
+	testTool, err := kimi.CreateTool(func(args testToolArgs) (testToolResult, error) {
+		called = true
+		receivedInput = args.Input
+		return testToolResult("result: " + args.Input), nil
+	}, kimi.WithName("test_tool"))
+	if err != nil {
+		t.Fatalf("CreateTool: %v", err)
+	}
+
+	session, err := kimi.NewSession(
+		kimi.WithExecutable(mockPath),
+		kimi.WithTools(testTool),
+		withMode("tool_call"),
+	)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	defer session.Close()
+
+	turn, err := session.Prompt(context.Background(), wire.NewStringContent("test"))
+	if err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	// Consume all messages
+	for step := range turn.Steps {
+		for range step.Messages {
+		}
+	}
+
+	if err := turn.Err(); err != nil {
+		t.Fatalf("turn error: %v", err)
+	}
+
+	// Verify tool was called
+	if !called {
+		t.Error("expected tool to be called")
+	}
+	if receivedInput != "hello" {
+		t.Errorf("expected input 'hello', got %q", receivedInput)
+	}
+
+	result := turn.Result()
+	if result.Status != wire.PromptResultStatusFinished {
+		t.Errorf("expected finished, got %s", result.Status)
+	}
+
+	t.Log("Tool call completed successfully")
 }

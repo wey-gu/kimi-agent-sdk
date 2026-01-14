@@ -2,7 +2,9 @@ package kimi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/rpc"
 	"os"
@@ -61,17 +63,27 @@ func NewSession(options ...Option) (*Session, error) {
 			return tpname + "." + cases.Title(language.English).String(method)
 		})),
 	)
+	tp := transport.NewTransportClient(rpc.NewClientWithCodec(codec))
+	var toolDefs []wire.ExternalTool
+	for _, tool := range opt.tools {
+		toolDefs = append(toolDefs, tool.def)
+	}
+	if _, err = tp.Init(&wire.InitParams{ExternalTools: toolDefs}); err != nil {
+		cancel()
+		return nil, err
+	}
 	session := &Session{
 		ctx:   ctx,
 		cmd:   cmd,
 		codec: codec,
-		tp:    transport.NewTransportClient(rpc.NewClientWithCodec(codec)),
+		tp:    tp,
 	}
 	responder := transport.NewTransportServer(&Responder{
 		rwlock:                  &session.rwlock,
 		pending:                 &session.pending,
 		wireMessageBridge:       &session.wireMessageBridge,
 		wireRequestResponseChan: &session.wireRequestResponseChan,
+		tools:                   opt.tools,
 	})
 	go session.serve(responder)
 	watch := func() {
@@ -253,6 +265,7 @@ type Responder struct {
 	pending                 *atomic.Int64
 	wireMessageBridge       *chan wire.Message
 	wireRequestResponseChan *chan wire.RequestResponse
+	tools                   []Tool
 }
 
 func (r *Responder) Event(event *wire.EventParams) (*wire.EventResult, error) {
@@ -272,25 +285,58 @@ func (r *Responder) Request(request *wire.RequestParams) (*wire.RequestResult, e
 	r.rwlock.RLock()
 	defer r.rwlock.RUnlock()
 	if *r.wireMessageBridge == nil || *r.wireRequestResponseChan == nil {
-		return &wire.RequestResult{
-			RequestID: request.Payload.RequestID(),
-			Response:  wire.RequestResponseReject,
-		}, nil
+		return nil, jsonrpc2.Error{
+			Code:    jsonrpc2.ErrorCodeInternalError,
+			Message: "no roundtrip in progress",
+		}
 	}
-	var wr wire.Request
-	switch payload := request.Payload.(type) {
+	switch req := request.Payload.(type) {
 	case wire.ApprovalRequest:
-		payload.Responder = ResponderFunc(func(rr wire.RequestResponse) error {
+		req.Responder = ResponderFunc(func(rr wire.RequestResponse) error {
 			*r.wireRequestResponseChan <- rr
 			return nil
 		})
-		wr = payload
+		*r.wireMessageBridge <- req
+		return &wire.RequestResult{
+			RequestID: req.ID,
+			Response:  <-*r.wireRequestResponseChan,
+		}, nil
+	case wire.ExternalToolCallRequest:
+		for _, tool := range r.tools {
+			if tool.def.Type == req.Type &&
+				tool.def.Function.Valid && tool.def.Function.Value.Name == req.Function.Name &&
+				req.Function.Arguments.Valid {
+				toolResult, err := tool.call(json.RawMessage(req.Function.Arguments.Value))
+				var output wire.Content
+				if err != nil {
+					output = wire.NewStringContent(err.Error())
+				} else {
+					output = wire.NewStringContent(toolResult)
+				}
+				return &wire.RequestResult{
+					RequestID: req.ID,
+					Response: wire.ExternalToolCallRequestResponse{
+						ToolResult: wire.ToolResult{
+							ToolCallID: req.ToolCallID,
+							ReturnValue: wire.ToolResultReturnValue{
+								IsError: err != nil,
+								Output:  output,
+							},
+						},
+					},
+				}, nil
+			}
+		}
+		return nil, jsonrpc2.Error{
+			Code:    jsonrpc2.ErrorCodeInvalidParams,
+			Message: fmt.Sprintf("%s tool not found: %s", req.Type, req.Function.Name),
+		}
+	default:
+		return nil, jsonrpc2.Error{
+			Code:    jsonrpc2.ErrorCodeInvalidRequest,
+			Message: fmt.Sprintf("unknown request type: %T", req),
+		}
 	}
-	*r.wireMessageBridge <- wr
-	return &wire.RequestResult{
-		RequestID: request.Payload.RequestID(),
-		Response:  <-*r.wireRequestResponseChan,
-	}, nil
 }
 
 func (s *Session) Close() error {

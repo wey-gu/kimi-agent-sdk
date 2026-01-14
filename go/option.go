@@ -7,9 +7,10 @@ import (
 type Option func(*option)
 
 type option struct {
-	exec string
-	args []string
-	envs []string
+	exec  string
+	args  []string
+	envs  []string
+	tools []Tool
 }
 
 func WithExecutable(executable string) Option {
@@ -101,5 +102,11 @@ func WithSkillsDir(dir string) Option {
 func WithArgs(args ...string) Option {
 	return func(opt *option) {
 		opt.args = append(opt.args, args...)
+	}
+}
+
+func WithTools(tools ...Tool) Option {
+	return func(opt *option) {
+		opt.tools = append(opt.tools, tools...)
 	}
 }

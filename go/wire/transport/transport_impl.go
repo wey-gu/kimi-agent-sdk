@@ -16,6 +16,16 @@ type implTransportClient struct {
 	rpcClient *rpc.Client
 }
 
+func (impl *implTransportClient) Init(params *wire.InitParams) (*wire.InitResult, error) {
+	InitRPCReply :=
+		new(wire.InitResult)
+	InitErr := impl.rpcClient.Call("Transport.Init", params, InitRPCReply)
+	if InitErr != nil {
+		return nil, InitErr
+	}
+	return InitRPCReply, nil
+}
+
 func (impl *implTransportClient) Prompt(params *wire.PromptParams) (*wire.PromptResult, error) {
 	PromptRPCReply :=
 		new(wire.PromptResult)
@@ -64,6 +74,18 @@ func NewTransportServer(impl Transport) *TransportServer {
 
 type TransportServer struct {
 	implTransport Transport
+}
+
+func (srv *TransportServer) Init(
+	arg *wire.InitParams,
+	reply *wire.InitResult,
+) error {
+	InitRPCReply, InitErr := srv.implTransport.Init(arg)
+	if InitErr != nil {
+		return InitErr
+	}
+	*reply = *InitRPCReply
+	return nil
 }
 
 func (srv *TransportServer) Prompt(
