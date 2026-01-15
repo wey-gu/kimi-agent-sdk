@@ -18,8 +18,8 @@
     "paths": {
       "@/*": ["src/*"],
       "shared/*": ["../shared/*"],
-      "@kimi/agent-sdk": ["../../agent_sdk/index.ts"],
-      "@kimi/agent-sdk/*": ["../../agent_sdk/*"]
+      "@kimi-code/agent-sdk": ["../../agent_sdk/index.ts"],
+      "@kimi-code/agent-sdk/*": ["../../agent_sdk/*"]
     }
   },
   "include": ["src"]

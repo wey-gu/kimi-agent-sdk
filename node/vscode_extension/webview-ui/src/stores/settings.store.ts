@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { bridge } from "@/services";
 import type { ExtensionConfig } from "shared/types";
-import type { MCPServerConfig, ModelConfig, ThinkingMode } from "@kimi/agent-sdk";
+import type { MCPServerConfig, ModelConfig, ThinkingMode } from "@kimi-code/agent-sdk";
 
 export const DEFAULT_EXTENSION_CONFIG: ExtensionConfig = {
   executablePath: "",
