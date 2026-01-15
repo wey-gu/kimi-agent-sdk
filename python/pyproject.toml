@@ -1,0 +1,59 @@
+[project]
+name = "kimi-agent-sdk"
+version = "0.1.0"
+description = "A Python SDK for Kimi Agent (Kimi CLI)."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "kimi-cli>=0.77,<0.78",
+    "kosong>=0.38.0,<0.39.0",
+]
+
+[dependency-groups]
+dev = [
+    "inline-snapshot[black]>=0.31.1",
+    "pdoc>=16.0.0",
+    "pyright>=1.1.407",
+    "ty>=0.0.7",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "ruff>=0.14.10",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = ["kimi_agent_sdk"]
+source-exclude = ["tests/**/*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle
+    "F",   # Pyflakes
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I",   # isort
+]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+include = [
+    "src/**/*.py",
+    "tests/**/*.py",
+]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+include = [
+    "src/**/*.py",
+    "tests/**/*.py",
+]
