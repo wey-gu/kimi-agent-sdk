@@ -61,7 +61,7 @@ export function ConfigErrorScreen({ type, errorMessage }: Props) {
               <IconTerminal2 className="size-4" />
               <span>Manual install:</span>
             </div>
-            <code className="block text-xs bg-background rounded px-3 py-2 font-mono select-all">uv tool install --python 3.13 kimi-code</code>
+            <code className="block text-xs bg-background rounded px-3 py-2 font-mono select-all">uv tool install --python 3.13 kimi-cli</code>
           </div>
         </div>
       </div>
@@ -85,7 +85,7 @@ export function ConfigErrorScreen({ type, errorMessage }: Props) {
             <IconTerminal2 className="size-4" />
             <span>Run in terminal:</span>
           </div>
-          <code className="block text-xs bg-background rounded px-3 py-2 font-mono select-all">kimi-code setup</code>
+          <code className="block text-xs bg-background rounded px-3 py-2 font-mono select-all">kimi code setup</code>
         </div>
       </div>
     </div>

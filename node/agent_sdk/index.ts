@@ -3,7 +3,7 @@
  *
  * @example Quick Start
  * ```typescript
- * import { createSession } from "@kimi-code/agent-sdk";
+ * import { createSession } from "@kimi/agent-sdk";
  *
  * const session = createSession({
  *   workDir: process.cwd(),
@@ -21,7 +21,7 @@
  * await session.close();
  * ```
  *
- * @module @kimi-code/agent-sdk
+ * @module @kimi/agent-sdk
  */
 
 // Session

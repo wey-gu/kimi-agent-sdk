@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { DisplayBlock, ApprovalResponse } from "@kimi-code/agent-sdk/schema";
+import type { DisplayBlock, ApprovalResponse } from "@kimi/agent-sdk/schema";
 import { bridge } from "@/services";
 
 export interface ApprovalRequest {
