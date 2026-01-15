@@ -163,6 +163,13 @@ See the [guides](./guides) for detailed documentation:
 - [Turn Cancellation](./guides/turn-cancellation.md) - Cancel and continue sessions
 - [Costs and Usage](./guides/costs-and-usage.md) - Track token consumption
 
+## Examples
+
+See the [examples](./examples) directory for complete working examples:
+
+- [Ralph Loop](./examples/ralph-loop) - Iterative AI task pattern with external verification
+- [Rumor Buster](./examples/rumor-buster) - Demonstrates ExternalTool capability for fact-checking
+
 ## Architecture
 
 ```
