@@ -41,6 +41,10 @@ jobs:
         run: pnpm build
         working-directory: node/agent_sdk
 
+      - name: Typecheck
+        run: pnpm typecheck
+        working-directory: node/agent_sdk
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
