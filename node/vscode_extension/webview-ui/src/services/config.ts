@@ -7,7 +7,7 @@ export const IMAGE_CONFIG = {
 } as const;
 
 export const VIDEO_CONFIG = {
-  maxSizeBytes: 20 * 1024 * 1024,
+  maxSizeBytes: 40 * 1024 * 1024,
   allowedTypes: ["video/mp4", "video/webm", "video/quicktime"] as const,
 } as const;
 
