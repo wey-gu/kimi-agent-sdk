@@ -146,7 +146,7 @@ function AssistantMessage({ message, isStreaming }: { message: ChatMessageType; 
   }
 
   const displayContent = typeof message.content === "string" ? message.content : "";
-  const hasActiveStreaming = isStreaming && steps.some((step) => step.items.some((item) => (item.type === "text" || item.type === "thinking") && !item.finished));
+  const isShowingInlineError = message.inlineError && !isStreaming;
 
   return (
     <div className="@container px-3 py-3 group/message">
@@ -174,13 +174,13 @@ function AssistantMessage({ message, isStreaming }: { message: ChatMessageType; 
             </div>
 
             {/* 内嵌错误显示 */}
-            {message.inlineError && !isStreaming && (
+            {isShowingInlineError && message.inlineError && (
               <div className="@[420px]:pl-5">
                 <InlineError error={message.inlineError} />
               </div>
             )}
             <div className="flex flex-row items-center space-between">
-              <div className="inline-flex flex-1">{hasActiveStreaming && !isCompacting && <ThinkingIndicator />}</div>
+              <div className="inline-flex flex-1">{isStreaming && !isShowingInlineError && !isCompacting && <ThinkingIndicator />}</div>
               <div className="inline-flex flex-1" />
               {!isStreaming && contentToCopy.trim().length > 0 && (
                 <div className="flex justify-start pt-1 opacity-0 group-hover/message:opacity-100 transition-opacity duration-100">
