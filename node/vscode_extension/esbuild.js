@@ -1,15 +1,40 @@
 const esbuild = require("esbuild");
 const path = require("path");
+const fs = require("fs");
 
 const production = process.argv.includes("--production");
 const watch = process.argv.includes("--watch");
 
-/**
- * @type {import('esbuild').Plugin}
- */
+const watchAgentSdkPlugin = {
+  name: "watch-agent-sdk",
+  setup(build) {
+    // Collect agent_sdk files for watching
+    const agentSdkDir = path.resolve(__dirname, "../agent_sdk");
+    const tsFiles = [];
+    function walkDir(dir) {
+      const files = fs.readdirSync(dir, { withFileTypes: true });
+      for (const file of files) {
+        const fullPath = path.join(dir, file.name);
+        if (file.isDirectory() && !file.name.includes("node_modules") && !file.name.includes("dist")) {
+          walkDir(fullPath);
+        } else if (file.name.endsWith(".ts") && !file.name.endsWith(".test.ts")) {
+          tsFiles.push(fullPath);
+        }
+      }
+    }
+    walkDir(agentSdkDir);
+
+    // Use onLoad to add watch dependencies for agent_sdk files
+    build.onLoad({ filter: /agent_sdk.*\.ts$/ }, (args) => {
+      return {
+        watchFiles: tsFiles,
+      };
+    });
+  },
+};
+
 const esbuildProblemMatcherPlugin = {
   name: "esbuild-problem-matcher",
-
   setup(build) {
     build.onStart(() => {
       console.log("[watch] build started");
@@ -45,22 +70,12 @@ async function main() {
       "@moonshot-ai/kimi-agent-sdk/schema": path.resolve(__dirname, "../agent_sdk/schema.ts"),
       "@moonshot-ai/kimi-agent-sdk/utils": path.resolve(__dirname, "../agent_sdk/utils.ts"),
     },
-    plugins: [
-      esbuildProblemMatcherPlugin,
-      {
-        name: "watch-build",
-        setup(build) {
-          build.onEnd((result) => {
-            console.log("[watch] build finished");
-          });
-        },
-      },
-    ],
+    plugins: [watchAgentSdkPlugin, esbuildProblemMatcherPlugin],
   });
 
   if (watch) {
     await ctx.watch();
-    console.log("[watch] watching...");
+    console.log("[watch] watching for changes in extension and agent_sdk...");
   } else {
     await ctx.rebuild();
     await ctx.dispose();

@@ -1,54 +1,60 @@
 import * as crypto from "node:crypto";
 import { ProtocolClient } from "./protocol";
 import { SessionError } from "./errors";
-import type { SessionOptions, ContentPart, StreamEvent, RunResult, ApprovalResponse } from "./schema";
+import { log } from "./logger";
+import type { SessionOptions, ContentPart, StreamEvent, RunResult, ApprovalResponse, SlashCommandInfo, ExternalTool } from "./schema";
 
 export type SessionState = "idle" | "active" | "closed";
 
-/** 当前生效的配置快照 */
+/** Active Configuration Snapshot */
 interface ActiveConfig {
   model: string | undefined;
   thinking: boolean;
   yoloMode: boolean;
   executable: string;
   env: string; // JSON stringified for comparison
+  externalTools: string;
 }
 
-/** Turn 接口，代表一次对话轮次 */
+/** Turn interface, represents a single conversation turn */
 export interface Turn {
-  /** 异步迭代事件流，迭代完成后返回 RunResult */
+  /** Asynchronous iterator of event stream, returns RunResult upon completion */
   [Symbol.asyncIterator](): AsyncIterator<StreamEvent, RunResult, undefined>;
-  /** 中断当前轮次，清空消息队列 */
+  /** Interrupt the current turn, clearing the message queue */
   interrupt(): Promise<void>;
-  /** 响应审批请求 */
+  /** Respond to approval request */
   approve(requestId: string, response: ApprovalResponse): Promise<void>;
-  /** 轮次完成后的结果 Promise */
+  /** Promise of the result after the turn is completed */
   readonly result: Promise<RunResult>;
 }
 
-/** Session 接口，代表一个与 Kimi Code 的持久连接 */
+/** Session interface, represents a persistent connection with Kimi Code */
 export interface Session {
-  /** 会话 ID */
+  /** Session ID */
   readonly sessionId: string;
-  /** 工作目录 */
+  /** Working directory */
   readonly workDir: string;
-  /** 当前状态：idle | active | closed */
+  /** Current state: idle | active | closed */
   readonly state: SessionState;
-  /** 模型 ID，可在轮次间修改 */
+  // Slash commands available in this session
+  readonly slashCommands: SlashCommandInfo[];
+
   model: string | undefined;
-  /** 是否启用思考模式，可在轮次间修改 */
+  /** Whether thinking mode is enabled, can be changed between turns */
   thinking: boolean;
-  /** 是否自动批准操作，可在轮次间修改 */
+  /** Whether to automatically approve actions, can be changed between turns */
   yoloMode: boolean;
-  /** CLI 可执行文件路径，可在轮次间修改 */
+  /** CLI executable path, can be changed between turns */
   executable: string;
-  /** 环境变量，可在轮次间修改 */
+  /** Environment variables, can be changed between turns */
   env: Record<string, string>;
-  /** 发送消息，返回 Turn 对象 */
+  // Exported external tools
+  externalTools: ExternalTool[];
+  /** Send a message, returns a Turn object */
   prompt(content: string | ContentPart[]): Turn;
-  /** 关闭会话，释放资源 */
+  /** Close the session, release resources */
   close(): Promise<void>;
-  /** 支持 using 语法自动关闭 */
+  /** Supports using syntax for automatic closure */
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -128,6 +134,9 @@ class SessionImpl implements Session {
   private _yoloMode: boolean;
   private _executable: string;
   private _env: Record<string, string>;
+  private _externalTools: ExternalTool[];
+  private _slashCommands: SlashCommandInfo[] = [];
+
   private _state: SessionState = "idle";
 
   private client: ProtocolClient | null = null;
@@ -143,6 +152,9 @@ class SessionImpl implements Session {
     this._yoloMode = options.yoloMode ?? false;
     this._executable = options.executable ?? "kimi";
     this._env = options.env ?? {};
+    this._externalTools = options.externalTools ?? [];
+
+    log.session("Created session %s in %s", this._sessionId, this._workDir);
   }
 
   get sessionId(): string {
@@ -153,6 +165,9 @@ class SessionImpl implements Session {
   }
   get state(): SessionState {
     return this._state;
+  }
+  get slashCommands(): SlashCommandInfo[] {
+    return this._slashCommands;
   }
   get model(): string | undefined {
     return this._model;
@@ -184,6 +199,12 @@ class SessionImpl implements Session {
   set env(v: Record<string, string>) {
     this._env = v;
   }
+  get externalTools(): ExternalTool[] {
+    return this._externalTools;
+  }
+  set externalTools(v: ExternalTool[]) {
+    this._externalTools = v;
+  }
 
   prompt(content: string | ContentPart[]): Turn {
     if (this._state === "closed") {
@@ -191,6 +212,7 @@ class SessionImpl implements Session {
     }
 
     this.pendingMessages.push(content);
+    log.session("Queued prompt, pending: %d", this.pendingMessages.length);
 
     if (this._state === "active" && this.currentTurn) {
       return this.currentTurn;
@@ -209,6 +231,7 @@ class SessionImpl implements Session {
           this._state = "idle";
         }
         this.currentTurn = null;
+        log.session("Turn completed, state: %s", this._state);
       },
     );
 
@@ -219,6 +242,8 @@ class SessionImpl implements Session {
     if (this._state === "closed") {
       return;
     }
+
+    log.session("Closing session %s", this._sessionId);
     this._state = "closed";
     this.currentTurn = null;
     this.pendingMessages = [];
@@ -227,7 +252,7 @@ class SessionImpl implements Session {
       try {
         await this.client.stop();
       } catch (err) {
-        console.warn("[session] Error during close:", err);
+        log.session("Error during close: %O", err);
       }
       this.client = null;
       this.activeConfig = null;
@@ -247,12 +272,13 @@ class SessionImpl implements Session {
 
     // Config changed or no client, restart
     if (this.client) {
+      log.session("Config changed, restarting client");
       await this.client.stop();
       this.client = null;
     }
 
     this.client = new ProtocolClient();
-    this.client.start({
+    const initResult = await this.client.start({
       sessionId: this._sessionId,
       workDir: this._workDir,
       model: this._model,
@@ -260,7 +286,10 @@ class SessionImpl implements Session {
       yoloMode: this._yoloMode,
       executablePath: this._executable,
       environmentVariables: this._env,
+      externalTools: this._externalTools,
     });
+
+    this._slashCommands = initResult.slash_commands;
     this.activeConfig = currentConfig;
 
     return this.client;
@@ -273,6 +302,7 @@ class SessionImpl implements Session {
       yoloMode: this._yoloMode,
       executable: this._executable,
       env: JSON.stringify(this._env),
+      externalTools: JSON.stringify(this._externalTools.map((t) => t.name)),
     };
   }
 
@@ -283,7 +313,8 @@ class SessionImpl implements Session {
       current.thinking !== active.thinking ||
       current.yoloMode !== active.yoloMode ||
       current.executable !== active.executable ||
-      current.env !== active.env
+      current.env !== active.env ||
+      current.externalTools !== active.externalTools
     );
   }
 }

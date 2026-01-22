@@ -1,6 +1,6 @@
 {
   "name": "@moonshot-ai/kimi-agent-sdk",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "SDK for interacting with Kimi Code CLI",
   "license": "MIT",
   "repository": {
@@ -55,10 +55,13 @@
     "publish:npm": "pnpm publish --access public --no-git-checks"
   },
   "dependencies": {
+    "debug": "^4.4.3",
     "toml": "^3.0.0",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@types/debug": "^4.1.12",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^3.2.4",
     "tsup": "^8.0.0",

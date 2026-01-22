@@ -12,8 +12,6 @@
 export const Methods = {
   CheckWorkspace: "checkWorkspace",
   CheckCLI: "checkCLI",
-  InstallCLI: "installCLI",
-
   SaveConfig: "saveConfig",
   GetExtensionConfig: "getExtensionConfig",
   OpenSettings: "openSettings",

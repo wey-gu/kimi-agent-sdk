@@ -10,22 +10,19 @@ import { useChatStore, useSettingsStore } from "./stores";
 import { bridge, Events } from "./services";
 import { useAppInit } from "./hooks/useAppInit";
 import { isPreflightError, getUserMessage } from "shared/errors";
-import type { UIStreamEvent, StreamError } from "shared/types";
+import type { UIStreamEvent, StreamError, ExtensionConfig } from "shared/types";
 import "./styles/index.css";
 
 function MainContent() {
   const { processEvent, startNewConversation } = useChatStore();
-  const { setMCPServers, extensionConfig } = useSettingsStore();
+  const { setMCPServers, setExtensionConfig, extensionConfig } = useSettingsStore();
 
   useEffect(() => {
     return bridge.on(Events.StreamEvent, (event: UIStreamEvent) => {
       processEvent(event);
-
-      // Pre-flight 错误显示 Toast
       if (event.type === "error") {
         const streamError = event as StreamError;
         const code = streamError.code || "UNKNOWN";
-
         if (isPreflightError(code)) {
           const message = getUserMessage(code, streamError.message);
           toast.error(message);
@@ -37,11 +34,12 @@ function MainContent() {
   useEffect(() => {
     const unsubs = [
       bridge.on(Events.MCPServersChanged, setMCPServers),
+      bridge.on(Events.ExtensionConfigChanged, ({ config }: { config: ExtensionConfig }) => setExtensionConfig(config)),
       bridge.on(Events.FocusInput, () => document.querySelector<HTMLTextAreaElement>("textarea")?.focus()),
       bridge.on(Events.NewConversation, () => startNewConversation()),
     ];
     return () => unsubs.forEach((u) => u());
-  }, [setMCPServers, startNewConversation]);
+  }, [setMCPServers, setExtensionConfig, startNewConversation]);
 
   useEffect(() => {
     if (!extensionConfig.enableNewConversationShortcut) {
@@ -70,13 +68,13 @@ function MainContent() {
 }
 
 export default function App() {
-  const { status, errorType, errorMessage } = useAppInit();
+  const { status, errorType, errorMessage, cliResult } = useAppInit();
 
   if (status !== "ready") {
     return (
       <div className="flex flex-col h-screen text-foreground overflow-hidden">
         <Header />
-        <ConfigErrorScreen type={errorType ?? "loading"} errorMessage={errorMessage} />
+        <ConfigErrorScreen type={errorType ?? "loading"} cliResult={cliResult} errorMessage={errorMessage} />
         <Toaster position="top-center" />
       </div>
     );

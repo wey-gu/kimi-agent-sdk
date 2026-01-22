@@ -1,48 +1,32 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import * as fs from "fs";
-import * as path from "node:path";
 import * as crypto from "crypto";
-import { spawn } from "child_process";
+import { execFile, execSync } from "child_process";
+import { promisify } from "util";
+import { ProtocolClient, type InitializeResult } from "@moonshot-ai/kimi-agent-sdk";
+import type { CLICheckResult, CLIErrorType } from "../../shared/types";
 
-const MIN_CLI_VERSION = "0.72";
-const MIN_WIRE_PROTOCOL_VERSION = "1";
-const GITHUB_RELEASE_BASE = "https://github.com/MoonshotAI/kimi-cli/releases/latest/download";
-const GITHUB_API_LATEST = "https://api.github.com/repos/MoonshotAI/kimi-cli/releases/latest";
+const execAsync = promisify(execFile);
 
-interface CLIInfo {
-  kimi_cli_version: string;
-  wire_protocol_version: string;
-}
+const MIN_CLI_VERSION = "0.82";
+const MIN_WIRE_VERSION = "1.1";
 
-let instance: CLIManager | null = null;
+let instance: CLIManager;
 
-export function initCLIManager(context: vscode.ExtensionContext): CLIManager {
-  instance = new CLIManager(context);
-  return instance;
-}
-
-export function getCLIManager(): CLIManager {
+export const initCLIManager = (ctx: vscode.ExtensionContext) => (instance = new CLIManager(ctx));
+export const getCLIManager = () => {
   if (!instance) {
-    throw new Error("CLIManager not initialized");
+    throw new Error("CLI not init");
   }
   return instance;
-}
+};
 
-function exec(cmd: string, args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    proc.stdout.on("data", (d) => (stdout += d));
-    proc.on("error", reject);
-    proc.on("close", (code) => (code === 0 ? resolve(stdout) : reject(new Error(`${cmd} exited with ${code}`))));
-  });
-}
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
+function compareVersion(current: string, min: string): number {
+  const v1 = current.split(".").map(Number);
+  const v2 = min.split(".").map(Number);
+  for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
+    const diff = (v1[i] || 0) - (v2[i] || 0);
     if (diff !== 0) {
       return diff;
     }
@@ -50,145 +34,117 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-export class CLIManager {
-  private binDir: string;
-  private executable: string;
+function classifyError(err: unknown): CLIErrorType {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("ENOENT") || message.includes("not found") || message.includes("spawn")) {
+    return "not_found";
+  }
+  if (message.includes("extract") || message.includes("Archive") || message.includes("tar")) {
+    return "extract_failed";
+  }
+  if (message.includes("protocol") || message.includes("wire") || message.includes("Initialize")) {
+    return "protocol_error";
+  }
+  return "not_found";
+}
 
-  constructor(private context: vscode.ExtensionContext) {
-    this.binDir = path.join(context.globalStorageUri.fsPath, "bin");
-    this.executable = path.join(this.binDir, process.platform === "win32" ? "kimi.exe" : "kimi");
+export class CLIManager {
+  private globalBin: string;
+  private bundledExec: string;
+  private extBin: string;
+
+  constructor(ctx: vscode.ExtensionContext) {
+    const binName = process.platform === "win32" ? "kimi.exe" : "kimi";
+    this.globalBin = path.join(ctx.globalStorageUri.fsPath, "bin", "kimi");
+    this.bundledExec = path.join(this.globalBin, binName);
+    this.extBin = path.join(ctx.extensionUri.fsPath, "bin", "kimi");
   }
 
   getExecutablePath(): string {
-    return vscode.workspace.getConfiguration("kimi").get<string>("executablePath", "") || this.executable;
+    return vscode.workspace.getConfiguration("kimi").get<string>("executablePath") || this.bundledExec;
   }
 
-  async checkInstalled(): Promise<boolean> {
-    const userPath = vscode.workspace.getConfiguration("kimi").get<string>("executablePath", "");
+  private isCustomPath(): boolean {
+    return !!vscode.workspace.getConfiguration("kimi").get<string>("executablePath");
+  }
 
-    if (userPath) {
-      const info = await this.getInfo(userPath).catch(() => null);
-      return info !== null && this.meetsRequirements(info);
+  async checkInstalled(workDir: string): Promise<CLICheckResult> {
+    const execPath = this.getExecutablePath();
+    const resolved = { isCustomPath: this.isCustomPath(), path: execPath };
+
+    console.log(`[Kimi Code] Checking CLI: ${execPath} (custom: ${resolved.isCustomPath})`);
+
+    try {
+      if (execPath === this.bundledExec && !fs.existsSync(execPath)) {
+        this.extractArchive();
+      }
+
+      const { kimi_cli_version, wire_protocol_version } = await this.getInfo(execPath);
+
+      if (compareVersion(kimi_cli_version, MIN_CLI_VERSION) < 0) {
+        return {
+          ok: false,
+          resolved,
+          error: {
+            type: "version_low",
+            message: `CLI version ${kimi_cli_version} is below minimum required ${MIN_CLI_VERSION}`,
+          },
+        };
+      }
+
+      if (compareVersion(wire_protocol_version, MIN_WIRE_VERSION) < 0) {
+        return {
+          ok: false,
+          resolved,
+          error: {
+            type: "version_low",
+            message: `Wire protocol ${wire_protocol_version} is below minimum required ${MIN_WIRE_VERSION}`,
+          },
+        };
+      }
+
+      const { slash_commands } = await this.verifyWire(execPath, workDir);
+
+      return { ok: true, slashCommands: slash_commands, resolved };
+    } catch (err) {
+      console.error(`[Kimi Code] CLI check failed:`, err);
+      return {
+        ok: false,
+        resolved,
+        error: {
+          type: classifyError(err),
+          message: err instanceof Error ? err.message : String(err),
+        },
+      };
     }
-
-    const info = await this.getInfo(this.executable).catch(() => null);
-    return info !== null && this.meetsRequirements(info);
   }
 
-  async installCLI(): Promise<void> {
-    const info = await this.getInfo(this.executable).catch(() => null);
-    if (info && this.meetsRequirements(info)) {
-      return;
+  private extractArchive(): void {
+    const archive = path.join(this.extBin, process.platform === "win32" ? "archive.zip" : "archive.tar.gz");
+    if (!fs.existsSync(archive)) {
+      throw new Error(`Archive missing: ${archive}`);
     }
-
-    await this.install();
-  }
-
-  private async getInfo(execPath: string): Promise<CLIInfo> {
-    const env = vscode.env.remoteName ? ` (remote: ${vscode.env.remoteName})` : "";
-    console.log(`[Kimi CLI] Getting info from ${execPath}${env}`);
-    const output = await exec(execPath, ["info", "--json"]);
-    return JSON.parse(output);
-  }
-
-  private meetsRequirements(info: CLIInfo): boolean {
-    return compareVersions(info.kimi_cli_version, MIN_CLI_VERSION) >= 0 && compareVersions(info.wire_protocol_version, MIN_WIRE_PROTOCOL_VERSION) >= 0;
-  }
-
-  private async install(): Promise<void> {
-    const platform = this.getPlatform();
-    if (!platform) {
-      throw new Error(`Unsupported: ${process.platform} ${process.arch}. Manual install: uv tool install --python 3.14 kimi-cli`);
+    fs.mkdirSync(this.globalBin, { recursive: true });
+    console.log(`[Kimi Code] Extracting to ${this.globalBin}...`);
+    if (process.platform === "win32") {
+      execSync(`powershell -NoProfile -Command "Expand-Archive -Path '${archive}' -DestinationPath '${this.globalBin}' -Force"`, { stdio: "ignore" });
+    } else {
+      execSync(`tar -xzf "${archive}" -C "${this.globalBin}" --strip-components=1`, { stdio: "ignore" });
+      fs.chmodSync(path.join(this.globalBin, "kimi"), 0o755);
     }
-
-    const remoteInfo = vscode.env.remoteName ? ` on ${vscode.env.remoteName}` : "";
-
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `Kimi: Installing CLI ${remoteInfo}`,
-        cancellable: false,
-      },
-      async (progress) => {
-        progress.report({ message: "Fetching version..." });
-
-        const res = await fetch(GITHUB_API_LATEST, {
-          headers: { "User-Agent": "kimi-vscode" },
-        });
-        const version = ((await res.json()) as { tag_name: string }).tag_name.replace(/^v/, "");
-
-        const archiveName = this.getArchiveName(version, platform);
-        const archivePath = path.join(this.binDir, archiveName);
-        await fs.promises.mkdir(this.binDir, { recursive: true });
-
-        progress.report({ message: "Downloading checksum..." });
-        const sha256Res = await fetch(`${GITHUB_RELEASE_BASE}/${archiveName}.sha256`);
-        const expectedHash = (await sha256Res.text()).trim().split(/\s+/)[0];
-
-        progress.report({ message: "Downloading CLI..." });
-        const archiveRes = await fetch(`${GITHUB_RELEASE_BASE}/${archiveName}`);
-        const total = +archiveRes.headers.get("content-length")!;
-        const reader = archiveRes.body!.getReader();
-        const chunks: Uint8Array[] = [];
-
-        for (let loaded = 0; ; ) {
-          const { done, value } = await reader.read();
-          if (done) {
-            break;
-          }
-          chunks.push(value);
-          loaded += value.length;
-          progress.report({
-            message: `Downloading CLI... ${((loaded / total) * 100) | 0}%`,
-          });
-        }
-
-        const buffer = Buffer.concat(chunks);
-
-        progress.report({ message: "Verifying..." });
-        const actualHash = crypto.createHash("sha256").update(buffer).digest("hex");
-        if (actualHash !== expectedHash) {
-          await fs.promises.unlink(archivePath).catch(() => {});
-          throw new Error(`Checksum mismatch`);
-        }
-
-        await fs.promises.writeFile(archivePath, buffer);
-
-        progress.report({ message: "Extracting..." });
-        if (platform.os === "windows") {
-          await exec("powershell", ["-NoProfile", "-Command", `Expand-Archive -Path "${archivePath}" -DestinationPath "${this.binDir}" -Force`]);
-        } else {
-          await exec("tar", ["-xzf", archivePath, "-C", this.binDir]);
-        }
-
-        await fs.promises.unlink(archivePath).catch(() => {});
-        if (process.platform !== "win32") {
-          await fs.promises.chmod(this.executable, 0o755);
-        }
-      },
-    );
   }
 
-  private getPlatform(): { os: "darwin" | "linux" | "windows"; arch: "aarch64" | "x86_64" } | null {
-    const map: Record<string, { os: "darwin" | "linux" | "windows"; arch: "aarch64" | "x86_64" }> = {
-      "darwin-arm64": { os: "darwin", arch: "aarch64" },
-      "darwin-x64": { os: "darwin", arch: "x86_64" },
-      "linux-arm64": { os: "linux", arch: "aarch64" },
-      "linux-x64": { os: "linux", arch: "x86_64" },
-      "win32-x64": { os: "windows", arch: "x86_64" },
-    };
-    return map[`${process.platform}-${process.arch}`] || null;
+  private async getInfo(execPath: string): Promise<{ kimi_cli_version: string; wire_protocol_version: string }> {
+    const { stdout } = await execAsync(execPath, ["info", "--json"]);
+    return JSON.parse(stdout);
   }
 
-  private getArchiveName(version: string, platform: { os: string; arch: string }): string {
-    const targets: Record<string, string> = {
-      "darwin-aarch64": "aarch64-apple-darwin",
-      "darwin-x86_64": "x86_64-apple-darwin",
-      "linux-aarch64": "aarch64-unknown-linux-gnu",
-      "linux-x86_64": "x86_64-unknown-linux-gnu",
-      "windows-x86_64": "x86_64-pc-windows-msvc",
-    };
-    const ext = platform.os === "windows" ? "zip" : "tar.gz";
-    return `kimi-${version}-${targets[`${platform.os}-${platform.arch}`]}.${ext}`;
+  private async verifyWire(executablePath: string, workDir: string): Promise<InitializeResult> {
+    const client = new ProtocolClient();
+    try {
+      return await client.start({ sessionId: crypto.randomUUID(), workDir, executablePath });
+    } finally {
+      await client.stop();
+    }
   }
 }

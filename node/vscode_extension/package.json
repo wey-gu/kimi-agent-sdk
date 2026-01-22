@@ -3,7 +3,7 @@
   "publisher": "moonshot-ai",
   "displayName": "Kimi Code",
   "description": "AI-powered coding assistant with Kimi Code",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -29,6 +29,7 @@
   ],
   "activationEvents": [],
   "main": "./dist/extension.js",
+  "icon": "resources/kimi-icon-storefront.png",
   "contributes": {
     "configuration": {
       "title": "Kimi Code",
@@ -46,7 +47,7 @@
         "kimi.executablePath": {
           "type": "string",
           "default": "",
-          "description": "Path to the Kimi Code executable"
+          "description": "Path to the Kimi Code executable (leave empty to use bundled CLI)"
         },
         "kimi.enableNewConversationShortcut": {
           "type": "boolean",
@@ -102,11 +103,6 @@
         "command": "kimi.showLogs",
         "title": "Kimi Code: Show Logs",
         "icon": "$(output)"
-      },
-      {
-        "command": "kimi.login",
-        "title": "Kimi Code: Login",
-        "icon": "$(sign-in)"
       },
       {
         "command": "kimi.logout",
@@ -188,10 +184,6 @@
           "when": "true"
         },
         {
-          "command": "kimi.login",
-          "when": "!kimi.isLoggedIn"
-        },
-        {
           "command": "kimi.logout",
           "when": "kimi.isLoggedIn"
         }
@@ -207,21 +199,26 @@
   },
   "scripts": {
     "vscode:prepublish": "pnpm run build",
-    "dev": "node dev.js",
+    "dev": "DEBUG=kimi-sdk:* node dev.js",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "build": "pnpm run build:webview && pnpm run build:extension",
     "build:webview": "pnpm --filter @moonshot-ai/vscode_extension-webview-ui build",
     "build:extension": "tsc --noEmit && node esbuild.js --production",
-    "package": "tsc --noEmit && node esbuild.js --production && vsce package --no-dependencies"
+    "download:cli": "node scripts/download-cli.js",
+    "package:platform": "node scripts/vsix-package.js",
+    "package:no-embedded": "vsce package --no-dependencies --out kimi-code.vsix"
   },
   "devDependencies": {
     "@types/node": "22.x",
     "@types/vscode": "^1.70.0",
+    "@vscode/vsce": "^3.0.0",
     "esbuild": "^0.27.1",
     "eslint": "^9.39.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.48.1",
-    "@vscode/vsce": "^3.0.0"
+    "typescript-eslint": "^8.48.1"
+  },
+  "dependencies": {
+    "debug": "^4.4.3"
   }
 }

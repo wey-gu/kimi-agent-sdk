@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { bridge } from "@/services";
 import type { ExtensionConfig } from "shared/types";
-import type { MCPServerConfig, ModelConfig, ThinkingMode } from "@moonshot-ai/kimi-agent-sdk";
+import type { MCPServerConfig, ModelConfig, ThinkingMode, SlashCommandInfo } from "@moonshot-ai/kimi-agent-sdk";
 
 export const DEFAULT_EXTENSION_CONFIG: ExtensionConfig = {
   executablePath: "",
@@ -64,6 +64,8 @@ interface SettingsState {
   defaultModel: string | null;
   defaultThinking: boolean;
   modelsLoaded: boolean;
+  wireSlashCommands: SlashCommandInfo[];
+  slashCommands: SlashCommandInfo[];
 
   setCurrentModel: (model: string) => void;
   setThinkingEnabled: (enabled: boolean) => void;
@@ -73,8 +75,7 @@ interface SettingsState {
   setMCPServers: (servers: MCPServerConfig[]) => void;
   setMCPModalOpen: (open: boolean) => void;
   initModels: (models: ModelConfig[], defaultModel: string | null, defaultThinking: boolean) => void;
-
-  // Computed getters
+  setWireSlashCommands: (commands: SlashCommandInfo[]) => void;
   getCurrentThinkingMode: () => ThinkingMode;
 }
 
@@ -88,6 +89,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   defaultModel: null,
   defaultThinking: false,
   modelsLoaded: false,
+  wireSlashCommands: [],
+  slashCommands: [],
 
   setCurrentModel: (currentModel) => set({ currentModel }),
 
@@ -160,6 +163,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       modelsLoaded: true,
       currentModel: initialModel,
       thinkingEnabled,
+    });
+  },
+
+  setWireSlashCommands: (commands) => {
+    set({
+      wireSlashCommands: commands,
+      slashCommands: commands,
     });
   },
 

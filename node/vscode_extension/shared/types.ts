@@ -1,4 +1,4 @@
-import type { RunResult, StreamEvent, ContentPart } from "@moonshot-ai/kimi-agent-sdk";
+import type { RunResult, StreamEvent, ContentPart, SlashCommandInfo } from "@moonshot-ai/kimi-agent-sdk";
 
 export interface SessionConfig {
   model: string;
@@ -48,7 +48,6 @@ export interface WorkspaceStatus {
   path?: string;
 }
 
-// Error handling types
 export type ErrorPhase = "preflight" | "runtime";
 
 export interface StreamError {
@@ -59,3 +58,18 @@ export interface StreamError {
 }
 
 export type UIStreamEvent = { type: "session_start"; sessionId: string; model?: string } | { type: "stream_complete"; result: RunResult } | StreamError | StreamEvent;
+
+export type CLIErrorType = "not_found" | "version_low" | "extract_failed" | "protocol_error";
+
+export interface CLICheckResult {
+  ok: boolean;
+  slashCommands?: SlashCommandInfo[];
+  error?: {
+    type: CLIErrorType;
+    message: string;
+  };
+  resolved: {
+    isCustomPath: boolean;
+    path: string;
+  };
+}
