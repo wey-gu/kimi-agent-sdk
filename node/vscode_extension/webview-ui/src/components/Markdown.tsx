@@ -3,22 +3,25 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useRequest } from "ahooks";
+import { IconVideo } from "@tabler/icons-react";
 import type { Components } from "react-markdown";
-import { parseSegments, parseColorSegments, extractPaths, checkFilesExist, hasColors } from "@/lib/text-enrichment";
+import { parseSegments, parseColorSegments, extractPaths, checkFilesExist, hasColors, isLocalPath } from "@/lib/text-enrichment";
+import { MediaPreviewModal, StreamImagePreview, ImagePlaceholder, ImageLoadFail } from "@/components/MediaPreviewModal";
+import { getMediaTypeFromSrc } from "@/lib/media-utils";
 import { bridge } from "@/services";
 
 interface MarkdownProps {
   content: string;
   className?: string;
   enableEnrichment?: boolean;
+  enableLocalImageRender?: boolean;
 }
 
 function useIsDark(): boolean {
   const [isDark, setIsDark] = useState(() => typeof document !== "undefined" && document.documentElement.classList.contains("dark"));
   useEffect(() => {
-    if (typeof document === "undefined") {
-      return;
-    }
+    if (typeof document === "undefined") return;
     const el = document.documentElement;
     const obs = new MutationObserver(() => setIsDark(el.classList.contains("dark")));
     obs.observe(el, { attributes: true, attributeFilter: ["class"] });
@@ -42,6 +45,20 @@ export function FileLink({ path, display }: { path: string; display: string }) {
   return (
     <button type="button" className="hover:text-zinc-900 dark:hover:text-white hover:underline cursor-pointer" onClick={onClick}>
       {display}
+    </button>
+  );
+}
+
+function VideoLink({ src }: { src: string }) {
+  const filename = src.split("/").pop() || src;
+  return (
+    <button
+      type="button"
+      onClick={() => bridge.openFile(src)}
+      className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded bg-muted hover:bg-muted/80 text-xs cursor-pointer"
+    >
+      <IconVideo className="size-4 text-muted-foreground" />
+      <span>{filename}</span>
     </button>
   );
 }
@@ -89,9 +106,38 @@ function enrichChildren(children: React.ReactNode, fileMap: Record<string, boole
   });
 }
 
-export const Markdown = memo(function Markdown({ content, className, enableEnrichment = true }: MarkdownProps) {
+function LocalImage({ src, alt, onPreview }: { src: string; alt?: string; onPreview: (uri: string) => void }) {
+  const { data } = useRequest(() => bridge.getImageDataUri(src), {
+    cacheKey: `local-image:${src}`,
+    staleTime: 10000,
+  });
+
+  if (!data) return <ImageLoadFail path={src} />;
+  return <StreamImagePreview src={data} alt={alt || src} onPreview={onPreview} />;
+}
+
+function ColorEnrichedText({ text }: { text: string }) {
+  const segments = useMemo(() => parseColorSegments(text), [text]);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.type === "color" ? (
+          <span key={i}>
+            <ColorSwatch color={seg.value} />
+            {seg.value}
+          </span>
+        ) : (
+          <span key={i}>{seg.value}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+export const Markdown = memo(function Markdown({ content, className, enableEnrichment = true, enableLocalImageRender = true }: MarkdownProps) {
   const isDark = useIsDark();
   const [fileMap, setFileMap] = useState<Record<string, boolean>>({});
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   useEffect(() => {
     // When enableEnrichment is false, skip enrichment process
@@ -130,7 +176,7 @@ export const Markdown = memo(function Markdown({ content, className, enableEnric
       ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
       ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
       a: ({ href, children }) => (
-        <a href={href} className="text-primary underline hover:no-underline" target="_blank" rel="noopener noreferrer">
+        <a href={href} className="text-blue-600 dark:text-blue-400 underline hover:no-underline" target="_blank" rel="noopener noreferrer">
           {children}
         </a>
       ),
@@ -141,6 +187,18 @@ export const Markdown = memo(function Markdown({ content, className, enableEnric
         </div>
       ),
       hr: () => <hr className="my-3 border-border" />,
+      img: ({ src, alt }) => {
+        if (!src) return null;
+        if (!enableLocalImageRender) return <span className="text-muted-foreground">{src}</span>;
+
+        if (getMediaTypeFromSrc(src) === "video") {
+          return isLocalPath(src) ? <VideoLink src={src} /> : null;
+        }
+        if (isLocalPath(src)) {
+          return <LocalImage src={src} alt={alt} onPreview={setPreviewSrc} />;
+        }
+        return <StreamImagePreview src={src} alt={alt} onPreview={setPreviewSrc} />;
+      },
       code: ({ className: cn, children, ...props }: any) => {
         const match = /language-(\w+)/.exec(cn || "");
         const code = String(children ?? "").replace(/\n$/, "");
@@ -162,15 +220,7 @@ export const Markdown = memo(function Markdown({ content, className, enableEnric
               language={match[1]}
               PreTag="div"
               customStyle={{ padding: "0.5rem", borderRadius: "0.375rem", fontSize: "11px", margin: 0 }}
-              codeTagProps={{
-                style: {
-                  backgroundColor: "transparent",
-                  fontFamily: "inherit",
-                  padding: 0,
-                  color: "inherit",
-                  borderRadius: 0,
-                },
-              }}
+              codeTagProps={{ style: { backgroundColor: "transparent", fontFamily: "inherit", padding: 0, color: "inherit", borderRadius: 0 } }}
             >
               {code}
             </SyntaxHighlighter>
@@ -189,33 +239,14 @@ export const Markdown = memo(function Markdown({ content, className, enableEnric
     };
   }, [enableEnrichment, fileMap, codeStyle]);
 
-  if (!content) {
-    return null;
-  }
+  if (!content) return null;
 
   return (
     <div className={className}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>
+      <MediaPreviewModal src={previewSrc} onClose={() => setPreviewSrc(null)} />
     </div>
   );
 });
-
-function ColorEnrichedText({ text }: { text: string }) {
-  const segments = useMemo(() => parseColorSegments(text), [text]);
-  return (
-    <>
-      {segments.map((seg, i) =>
-        seg.type === "color" ? (
-          <span key={i}>
-            <ColorSwatch color={seg.value} />
-            {seg.value}
-          </span>
-        ) : (
-          <span key={i}>{seg.value}</span>
-        ),
-      )}
-    </>
-  );
-}

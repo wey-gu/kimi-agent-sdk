@@ -1,6 +1,7 @@
 import { useChatStore } from "@/stores";
 import { cn } from "@/lib/utils";
-import { IconCpu, IconArrowUp, IconArrowDown } from "@tabler/icons-react";
+import { IconArrowUp, IconArrowDown, IconBrandSpeedtest } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
 export function ChatStatus() {
   const { lastStatus, tokenUsage, activeTokenUsage } = useChatStore();
@@ -26,18 +27,39 @@ export function ChatStatus() {
   return (
     <div className="flex items-center gap-3 text-[10px] text-muted-foreground border border-border/40 rounded-full px-2 py-0.5 select-none h-6 box-border mr-2 @max-[240px]:hidden">
       <div className="flex items-center gap-1.5" title="Context Window Usage">
-        <IconCpu className="size-3 opacity-70" />
-        <span className={cn(contextPercent > 80 && "text-amber-500", contextPercent > 95 && "text-destructive")}>{contextPercent}%</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-1.5">
+              <IconBrandSpeedtest className="size-3 opacity-70" />
+              <span className={cn(contextPercent > 80 && "text-amber-500", contextPercent > 95 && "text-destructive")}>{contextPercent}%</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Context Window Usage</TooltipContent>
+        </Tooltip>
       </div>
       <div className="w-px h-3 bg-border/50 @max-[440px]:hidden" />
       <div className="flex items-center gap-1.5 @max-[440px]:hidden" title="Total Input Tokens">
-        <IconArrowUp className="size-3 opacity-70" />
-        <span>{inputTotal.toLocaleString()}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-1.5">
+              <IconArrowUp className="size-3 opacity-70" />
+              <span>{inputTotal.toLocaleString()}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Total Input Tokens</TooltipContent>
+        </Tooltip>
       </div>
       <div className="w-px h-3 bg-border/50 @max-[400px]:hidden" />
       <div className="flex items-center gap-1.5 @max-[440px]:hidden" title="Output Tokens">
-        <IconArrowDown className="size-3 opacity-70" />
-        <span>{outputTotal.toLocaleString()}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-1.5">
+              <IconArrowDown className="size-3 opacity-70" />
+              <span>{outputTotal.toLocaleString()}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Total Output Tokens</TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );
