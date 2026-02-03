@@ -1,4 +1,5 @@
-import { IconAlertTriangle, IconTerminal2, IconLoader2, IconFolderOpen, IconSettings, IconExternalLink, IconRefresh } from "@tabler/icons-react";
+import { useState } from "react";
+import { IconAlertTriangle, IconTerminal2, IconLoader2, IconFolderOpen, IconSettings, IconExternalLink, IconChevronRight, IconArrowLeft, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { KimiMascot } from "./KimiMascot";
 import { bridge } from "@/services";
@@ -9,6 +10,7 @@ interface Props {
   cliResult?: CLICheckResult | null;
   errorMessage?: string | null;
   onRefresh?: () => void;
+  onBackToLogin?: () => void;
 }
 
 const CLI_ERROR_TITLES: Record<CLIErrorType, string> = {
@@ -17,6 +19,36 @@ const CLI_ERROR_TITLES: Record<CLIErrorType, string> = {
   extract_failed: "Installation Failed",
   protocol_error: "Connection Error",
 };
+
+function ManualSetupHint() {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="text-xs text-muted-foreground/70">
+      <button onClick={() => setExpanded(!expanded)} className="inline-flex items-center gap-0.5 hover:text-muted-foreground">
+        <IconChevronRight className={`size-3 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        Manual setup
+      </button>
+      {expanded && (
+        <>
+          <ol className="mt-2 ml-3.5 space-y-1 list-decimal list-outside marker:text-muted-foreground/50">
+            <li>
+              Install CLI from{" "}
+              <a href="https://kimi.com/code" target="_blank" className="underline hover:text-foreground">
+                kimi.com/code
+              </a>
+            </li>
+            <li> Run <code className="bg-muted px-1 rounded">kimi</code> in terminal </li>
+            <li> Type <code className="bg-muted px-1 rounded">/login</code> and follow the instructions </li>
+          </ol>
+          <span className="mt-1 block text-[11px] text-muted-foreground/70">
+            * For remote development, ensure CLI is installed in the remote environment
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
 
 function CLIErrorContent({ cliResult }: { cliResult?: CLICheckResult | null }) {
   const isCustomPath = cliResult?.resolved?.isCustomPath ?? false;
@@ -87,7 +119,7 @@ function CLIErrorContent({ cliResult }: { cliResult?: CLICheckResult | null }) {
   );
 }
 
-function NoModelsContent({ onRefresh }: { onRefresh?: () => void }) {
+function NoModelsContent({ onRefresh, onBackToLogin }: { onRefresh?: () => void; onBackToLogin?: () => void }) {
   return (
     <>
       <div className="space-y-2">
@@ -100,7 +132,7 @@ function NoModelsContent({ onRefresh }: { onRefresh?: () => void }) {
 
       <div className="space-y-4">
         <div className="bg-muted/50 rounded-lg p-4 text-left space-y-3">
-          <p className="text-xs font-medium text-foreground">Option 1: Subscribe to Kimi Code</p>
+          <p className="text-xs font-medium text-foreground">Option 1: Subscribe to Kimi Code (Recommended)</p>
           <a href="https://kimi.com/code" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs text-foreground hover:underline">
             <IconExternalLink className="size-4" />
             kimi.com/code
@@ -109,28 +141,38 @@ function NoModelsContent({ onRefresh }: { onRefresh?: () => void }) {
 
         <div className="bg-muted/50 rounded-lg p-4 text-left space-y-3">
           <p className="text-xs font-medium text-foreground">Option 2: Use your own API key</p>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <IconTerminal2 className="size-4" />
-            <span>Run in terminal:</span>
-          </div>
-          <code className="block text-xs bg-background rounded px-3 py-2 font-mono select-all">kimi</code>
           <p className="text-xs text-muted-foreground">
-            Then type <code className="bg-muted px-1 rounded">/setup</code> and enter your API key.
+            Type <code className="bg-muted px-1 rounded">/login</code> in terminal and  follow the instructions.
           </p>
+          <Button onClick={() => bridge.runCLI()} variant="outline" size="sm" className="gap-2 w-full">
+            <IconTerminal2 className="size-4" />
+            Open Terminal &amp; Run kimi
+          </Button>
+          <ManualSetupHint />
         </div>
       </div>
 
-      {onRefresh && (
-        <Button onClick={onRefresh} variant="outline" className="gap-2">
-          <IconRefresh className="size-4" />
-          Reload Configuration
-        </Button>
+      {(onBackToLogin || onRefresh) && (
+        <div className="flex flex-col min-[400px]:flex-row min-[400px]:justify-between gap-2 w-full">
+          {onBackToLogin && (
+            <Button onClick={onBackToLogin} variant="ghost" size="sm" className="gap-1 text-muted-foreground">
+              <IconArrowLeft className="size-3" />
+              Back to Login
+            </Button>
+          )}
+          {onRefresh && (
+            <Button onClick={onRefresh} variant="ghost" size="sm" className="gap-1 text-muted-foreground">
+              <IconRefresh className="size-3" />
+              Reload
+            </Button>
+          )}
+        </div>
       )}
     </>
   );
 }
 
-export function ConfigErrorScreen({ type, cliResult, onRefresh }: Props) {
+export function ConfigErrorScreen({ type, cliResult, onRefresh, onBackToLogin }: Props) {
   if (type === "loading") {
     return (
       <div className="h-full flex items-center justify-center p-6">
@@ -185,7 +227,7 @@ export function ConfigErrorScreen({ type, cliResult, onRefresh }: Props) {
       <div className="h-full flex items-center justify-center p-6">
         <div className="max-w-sm text-center space-y-6">
           <KimiMascot className="h-10 mx-auto opacity-50" />
-          <NoModelsContent onRefresh={onRefresh} />
+          <NoModelsContent onRefresh={onRefresh} onBackToLogin={onBackToLogin} />
         </div>
       </div>
     );
